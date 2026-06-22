@@ -1,0 +1,7 @@
+# Seed URLs for ingestion (one per line; blank lines and # comments ignored).
+# Replace/extend with the documentation you want NowLens to learn.
+# Usage:  nowlens ingest --file data/sample/seed_urls.txt
+#   or:   POST /api/v1/ingest  {"urls": [...], "wait": true}
+
+https://www.servicenow.com/docs/
+https://developer.servicenow.com/dev.do

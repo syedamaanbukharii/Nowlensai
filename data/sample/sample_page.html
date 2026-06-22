@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Incident Management — ServiceNow ITSM (sample)</title>
+  <meta name="description" content="Sample documentation page for offline ingestion demos." />
+</head>
+<body>
+  <header>
+    <nav>Home &gt; Docs &gt; ITSM &gt; Incident Management — navigation chrome that ingestion strips</nav>
+  </header>
+
+  <main>
+    <h1>Incident Management</h1>
+    <p>
+      Incident management coordinates the response to unplanned disruptions of an IT service.
+      Its goal is to restore normal service operation as quickly as possible while minimising
+      business impact. In ServiceNow ITSM, incidents are tracked on the <em>incident</em> table
+      and progressed through states from New to Resolved and Closed.
+    </p>
+
+    <h2>Assignment and routing</h2>
+    <p>
+      Use assignment rules to automatically route incidents to the correct assignment group based
+      on category, configuration item, or location. Combine assignment rules with on-call
+      scheduling so high-priority incidents reach an available engineer without manual triage.
+    </p>
+    <ul>
+      <li>Set the impact and urgency so priority is derived consistently.</li>
+      <li>Link related problems to capture root-cause work separately from restoration.</li>
+      <li>Record major incidents with the major incident workflow for coordinated response.</li>
+    </ul>
+
+    <h2>Automating with Flow Designer</h2>
+    <p>
+      Flow Designer provides no-code automation for the incident lifecycle. Build flows and
+      subflows to notify stakeholders, create tasks, and update records as an incident progresses,
+      reducing manual effort and ensuring consistent handling.
+    </p>
+    <pre><code>var gr = new GlideRecord('incident');
+gr.addQuery('active', true);
+gr.addQuery('priority', 1);
+gr.query();
+while (gr.next()) {
+  gs.info('Active P1 incident: ' + gr.getValue('number'));
+}</code></pre>
+
+    <h2>Reporting</h2>
+    <p>
+      Track operational health with metrics such as mean time to resolution (MTTR), reopen rate,
+      and first-call resolution. Dashboards built on these metrics help service owners spot trends
+      and target improvements.
+    </p>
+  </main>
+
+  <footer>
+    <p>Copyright 2026 Example Corp. All rights reserved. Privacy policy. Terms of use.</p>
+  </footer>
+</body>
+</html>

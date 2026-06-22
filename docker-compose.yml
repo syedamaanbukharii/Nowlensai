@@ -1,0 +1,123 @@
+# NowLens AI — local stack.
+#   docker compose up -d --build
+#
+# First run: pull models into Ollama and initialise stores:
+#   docker compose exec ollama ollama pull llama3.1:8b
+#   docker compose exec ollama ollama pull nomic-embed-text
+#   docker compose exec api alembic upgrade head
+#   docker compose exec api nowlens bootstrap
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
+    environment:
+      NOWLENS_ENVIRONMENT: ${NOWLENS_ENVIRONMENT:-development}
+      NOWLENS_DATABASE_URL: postgresql+asyncpg://nowlens:nowlens@postgres:5432/nowlens
+      NOWLENS_REDIS_URL: redis://redis:6379/0
+      NOWLENS_QDRANT_URL: http://qdrant:6333
+      NOWLENS_LLM__PROVIDER: ${NOWLENS_LLM__PROVIDER:-ollama}
+      NOWLENS_LLM__OLLAMA_BASE_URL: http://ollama:11434
+      NOWLENS_SECURITY__JWT_SECRET: ${NOWLENS_SECURITY__JWT_SECRET:-dev-insecure-change-me}
+      NOWLENS_CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - api
+    environment:
+      # Browser-side calls go to the host-exposed API port.
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nowlens
+      POSTGRES_PASSWORD: nowlens
+      POSTGRES_DB: nowlens
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nowlens"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes:
+      - qdrantdata:/qdrant/storage
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollamadata:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    depends_on:
+      - api
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheusdata:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  qdrantdata:
+  redisdata:
+  ollamadata:
+  prometheusdata:
+  grafanadata:
