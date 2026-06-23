@@ -8,17 +8,10 @@ documented capability boundary, not a stub: static crawling fully works without
 it.
 """
 from __future__ import annotations
-from typing import TYPE_CHECKING                        
+
 from nowlens.core.config import IngestionSettings
 from nowlens.core.logging import get_logger
 from nowlens.ingestion.models import CrawlResult
-
-if TYPE_CHECKING:                                       
-    from playwright.async_api import (                  
-        AsyncPlaywright,                                
-        Browser,                                        
-        Page,                                           
-    )                                                   
 
 log = get_logger(__name__)
 
@@ -33,7 +26,7 @@ class Renderer:
             return result
 
         try:
-            from playwright.async_api import async_playwright  # runtime import
+            from playwright.async_api import async_playwright
         except ImportError:  # pragma: no cover - optional dep
             log.warning("render.playwright_missing", url=result.url)
             return result
