@@ -1,5 +1,4 @@
 """Render stage (optional).
-
 ServiceNow docs and many SPAs render content client-side. When
 ``NOWLENS_INGEST_RENDER_JAVASCRIPT=true`` (and the ``render`` extra +
 ``playwright install chromium`` are present), this stage loads the page in a
@@ -8,12 +7,18 @@ pass-through — the crawler's static HTML is used unchanged. This is an explici
 documented capability boundary, not a stub: static crawling fully works without
 it.
 """
-
 from __future__ import annotations
-
+from typing import TYPE_CHECKING                        
 from nowlens.core.config import IngestionSettings
 from nowlens.core.logging import get_logger
 from nowlens.ingestion.models import CrawlResult
+
+if TYPE_CHECKING:                                       
+    from playwright.async_api import (                  
+        AsyncPlaywright,                                
+        Browser,                                        
+        Page,                                           
+    )                                                   
 
 log = get_logger(__name__)
 
@@ -26,8 +31,9 @@ class Renderer:
     async def render(self, result: CrawlResult) -> CrawlResult:
         if not self._enabled or not result.ok:
             return result
+
         try:
-            from playwright.async_api import async_playwright
+            from playwright.async_api import async_playwright  # runtime import
         except ImportError:  # pragma: no cover - optional dep
             log.warning("render.playwright_missing", url=result.url)
             return result
@@ -36,9 +42,14 @@ class Renderer:
             async with async_playwright() as pw:
                 browser = await pw.chromium.launch(headless=True)
                 page = await browser.new_page()
-                await page.goto(result.url, wait_until="networkidle", timeout=self._timeout_ms)
+                await page.goto(
+                    result.url,
+                    wait_until="networkidle",
+                    timeout=self._timeout_ms,
+                )
                 html = await page.content()
                 await browser.close()
+
             return CrawlResult(
                 url=result.url,
                 status_code=result.status_code,
@@ -46,6 +57,7 @@ class Renderer:
                 content_type=result.content_type,
                 rendered=True,
             )
-        except Exception as exc:  # noqa: BLE001 - degrade gracefully to static HTML
+
+        except Exception as exc:  # noqa: BLE001 - degrade gracefully
             log.warning("render.failed", url=result.url, error=str(exc))
             return result
