@@ -7,6 +7,7 @@ pass-through — the crawler's static HTML is used unchanged. This is an explici
 documented capability boundary, not a stub: static crawling fully works without
 it.
 """
+
 from __future__ import annotations
 
 from nowlens.core.config import IngestionSettings
