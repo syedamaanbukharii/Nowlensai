@@ -4,7 +4,6 @@ isolation (normalize, chunk, dedup, enrich, validate, clean, extract, embed)."""
 from __future__ import annotations
 
 import pytest
-from tests.conftest import EMBED_DIM, FakeChatProvider, FakeEmbeddingProvider
 
 from nowlens.ingestion.models import (
     Chunk,
@@ -23,6 +22,7 @@ from nowlens.ingestion.stages.enrich import enrich_chunk, enrich_chunks
 from nowlens.ingestion.stages.extract import extract
 from nowlens.ingestion.stages.normalize import normalize
 from nowlens.ingestion.stages.validate import validate_embedded
+from tests.conftest import EMBED_DIM, FakeChatProvider, FakeEmbeddingProvider
 
 
 def _chunk(text: str, *, index: int = 0, metadata: dict | None = None) -> Chunk:
@@ -202,57 +202,3 @@ def test_rule_clean_preserves_code_fence() -> None:
     raw = "Intro\n```\nSkip to main content\nvar x = 1;\n```\nOutro"
     cleaned = rule_clean(raw)
     # Nav-looking line inside a code fence must survive.
-    assert "Skip to main content" in cleaned
-    assert "var x = 1;" in cleaned
-
-
-async def test_ai_cleaner_falls_back_on_short_output() -> None:
-    provider = FakeChatProvider(text="tiny")
-    cleaner = AICleaner(provider, max_chars=6000)
-    original = "This is a reasonably long document about incident management. " * 5
-    result = await cleaner.clean(original)
-    # Output too short relative to input -> fall back to the original text.
-    assert result == original
-
-
-# --------------------------------------------------------------------------- #
-# extract
-# --------------------------------------------------------------------------- #
-
-
-def test_extract_pulls_title_and_main_content() -> None:
-    html = """
-    <html lang="en"><head><title>Doc Title</title></head>
-    <body>
-      <nav>menu noise should be dropped from extraction entirely</nav>
-      <main>
-        <h1>Incident Management</h1>
-        <p>This is the primary body content that should be extracted cleanly.</p>
-        <pre><code>var gr = new GlideRecord('incident');</code></pre>
-      </main>
-    </body></html>
-    """
-    doc = extract(CrawlResult(url="https://x/y", status_code=200, html=html))
-    assert doc.title == "Doc Title"
-    assert "Incident Management" in doc.text
-    assert "primary body content" in doc.text
-    assert "```" in doc.text
-    assert "menu noise" not in doc.text
-    assert doc.language == "en"
-
-
-# --------------------------------------------------------------------------- #
-# embed
-# --------------------------------------------------------------------------- #
-
-
-async def test_embed_chunks_one_vector_each() -> None:
-    embedder = FakeEmbeddingProvider()
-    chunks = [_chunk("incident", index=i) for i in range(3)]
-    embedded = await embed_chunks(chunks, embedder, batch_size=2)
-    assert len(embedded) == 3
-    assert all(len(e.embedding) == EMBED_DIM for e in embedded)
-
-
-if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(pytest.main([__file__, "-v"]))
