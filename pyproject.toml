@@ -127,6 +127,7 @@ namespace_packages = true
 
 [[tool.mypy.overrides]]
 module = [
+  "numpy.*",
   "qdrant_client.*",
   "rank_bm25.*",
   "selectolax.*",
