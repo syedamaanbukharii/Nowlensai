@@ -105,6 +105,24 @@ class IngestionSettings(BaseSettings):
     max_document_bytes: int = 5_000_000
 
 
+class DatabaseSettings(BaseSettings):
+    """Connection-pool tuning for the async SQLAlchemy engine.
+
+    The connection URL itself stays at the top level (``database_url``) for
+    backward compatibility with ``NOWLENS_DATABASE_URL``; these knobs let the
+    pool be sized for the deployment without code changes.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="NOWLENS_DB_", extra="ignore")
+
+    pool_size: int = 10
+    max_overflow: int = 20
+    pool_timeout_s: float = 30.0
+    # Recycle connections periodically so stale server-side connections (e.g.
+    # closed by a proxy or the database) are not handed out.
+    pool_recycle_s: int = 1800
+
+
 class SecuritySettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NOWLENS_SECURITY_", extra="ignore")
 
@@ -160,6 +178,7 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = None
 
+    db: DatabaseSettings = Field(default_factory=DatabaseSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     rag: RAGSettings = Field(default_factory=RAGSettings)
     ingestion: IngestionSettings = Field(default_factory=IngestionSettings)

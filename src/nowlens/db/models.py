@@ -91,9 +91,7 @@ class Message(Base):
     __tablename__ = "messages"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    session_id: Mapped[str] = mapped_column(
-        ForeignKey("chat_sessions.id", ondelete="CASCADE"), index=True
-    )
+    session_id: Mapped[str] = mapped_column(ForeignKey("chat_sessions.id", ondelete="CASCADE"))
     role: Mapped[str] = mapped_column(String(20))  # user | assistant | system
     content: Mapped[str] = mapped_column(Text)
     # Citations / intent / qa verdict for assistant turns.
@@ -183,3 +181,8 @@ class AuditLog(Base):
 
 # Time-ordered index for fetching a user's most recent sessions.
 Index("ix_chat_sessions_user_updated", ChatSession.user_id, ChatSession.updated_at.desc())
+
+# Composite index for "messages of a session, oldest first". Its leftmost prefix
+# (session_id) also serves session-scoped lookups, so no separate single-column
+# index on session_id is needed.
+Index("ix_messages_session_created", Message.session_id, Message.created_at)

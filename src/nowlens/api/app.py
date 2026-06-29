@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         # Release resources in reverse order of acquisition.
+        from nowlens.api.deps import close_redis
         from nowlens.db.session import dispose_engine
         from nowlens.llm.factory import close_providers
         from nowlens.services import reset_singletons
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         for name, closer in (
             ("providers", close_providers),
             ("singletons", reset_singletons),
+            ("redis", close_redis),
             ("engine", dispose_engine),
         ):
             try:

@@ -19,6 +19,7 @@ in-process state, and the dependency reflects that without failing requests.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from functools import lru_cache
 from typing import Annotated
 
@@ -77,6 +78,22 @@ def _get_redis():  # type: ignore[no-untyped-def]
 @lru_cache
 def _get_limiter() -> RateLimiter:
     return RateLimiter.from_settings(get_settings().security, redis=_get_redis())
+
+
+async def close_redis() -> None:
+    """Close the shared Redis client and clear the limiter caches (on shutdown).
+
+    The client and limiter are process-cached singletons; releasing the
+    connection pool here keeps graceful restarts from leaking connections.
+    """
+
+    if _get_redis.cache_info().currsize:
+        client = _get_redis()
+        if client is not None:
+            with suppress(Exception):
+                await client.aclose()
+    _get_redis.cache_clear()
+    _get_limiter.cache_clear()
 
 
 def _rate_limit_identity(request: Request) -> str:
