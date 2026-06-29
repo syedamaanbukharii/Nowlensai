@@ -38,7 +38,7 @@ from nowlens.ingestion.models import IngestionReport
 from nowlens.observability.metrics import observe_ingestion
 from nowlens.security.audit import audit_event
 from nowlens.services import get_vector_store
-from nowlens.workers.tasks import run_ingestion_job
+from nowlens.workers.tasks import run_ingestion_job, status_for_report
 
 log = get_logger(__name__)
 
@@ -59,12 +59,6 @@ def _report_out(report: IngestionReport) -> IngestReportOut:
             for s in report.stages
         ],
     )
-
-
-def _status_for(report: IngestionReport) -> JobStatus:
-    if report.skipped:
-        return JobStatus.SKIPPED
-    return JobStatus.SUCCEEDED if report.success else JobStatus.FAILED
 
 
 @router.post("/ingest", response_model=None)
@@ -95,7 +89,7 @@ async def ingest(
             report = await pipeline.ingest_url(url)
             await jobs.mark(
                 job_id,
-                status=_status_for(report),
+                status=status_for_report(report),
                 detail=report.error or ("skipped (unchanged)" if report.skipped else "ok"),
                 chunks_indexed=report.chunks_indexed,
                 duplicates_removed=report.duplicates_removed,

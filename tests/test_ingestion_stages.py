@@ -4,8 +4,8 @@ isolation (normalize, chunk, dedup, enrich, validate, clean, extract, embed)."""
 from __future__ import annotations
 
 import pytest
-from tests.conftest import EMBED_DIM, FakeChatProvider, FakeEmbeddingProvider
 
+from conftest import EMBED_DIM, FakeChatProvider, FakeEmbeddingProvider
 from nowlens.ingestion.models import (
     Chunk,
     CrawlResult,

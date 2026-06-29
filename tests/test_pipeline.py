@@ -9,8 +9,8 @@ validate -> index sequence runs with no external services.
 from __future__ import annotations
 
 import pytest
-from tests.conftest import EMBED_DIM, FakeEmbeddingProvider, InMemoryVectorStore
 
+from conftest import EMBED_DIM, FakeEmbeddingProvider, InMemoryVectorStore
 from nowlens.core.config import IngestionSettings
 from nowlens.ingestion.models import CrawlResult
 from nowlens.ingestion.pipeline import IngestionPipeline

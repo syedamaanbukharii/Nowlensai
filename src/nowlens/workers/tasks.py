@@ -30,7 +30,13 @@ def _stage_dict(stage: StageOutcome) -> dict[str, object]:
     return {"name": stage.name, "ok": stage.ok, "detail": stage.detail, "items": stage.items}
 
 
-def _status_for(report: IngestionReport) -> JobStatus:
+def status_for_report(report: IngestionReport) -> JobStatus:
+    """Map an ingestion report to the persisted job status.
+
+    Shared by the background worker and the inline ``/ingest`` path so both
+    record the same terminal status for the same outcome.
+    """
+
     if report.skipped:
         return JobStatus.SKIPPED
     return JobStatus.SUCCEEDED if report.success else JobStatus.FAILED
@@ -55,7 +61,7 @@ async def run_ingestion_job(job_id: str, url: str) -> IngestionReport:
         jobs = IngestionJobRepository(session)
         await jobs.mark(
             job_id,
-            status=_status_for(report),
+            status=status_for_report(report),
             detail=report.error or ("skipped (unchanged)" if report.skipped else "ok"),
             chunks_indexed=report.chunks_indexed,
             duplicates_removed=report.duplicates_removed,

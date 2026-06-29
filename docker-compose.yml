@@ -63,7 +63,8 @@ services:
     restart: unless-stopped
 
   qdrant:
-    image: qdrant/qdrant:latest
+    # Pinned for reproducible builds; bump deliberately after testing client compatibility.
+    image: qdrant/qdrant:v1.12.4
     volumes:
       - qdrantdata:/qdrant/storage
     ports:
