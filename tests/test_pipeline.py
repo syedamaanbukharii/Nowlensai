@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import EMBED_DIM, FakeEmbeddingProvider, InMemoryVectorStore
 from nowlens.core.config import IngestionSettings
 from nowlens.ingestion.models import CrawlResult
 from nowlens.ingestion.pipeline import IngestionPipeline
+from tests.conftest import EMBED_DIM, FakeEmbeddingProvider, InMemoryVectorStore
 
 SAMPLE_HTML = """
 <html lang="en"><head><title>ITSM Incident Management</title></head>

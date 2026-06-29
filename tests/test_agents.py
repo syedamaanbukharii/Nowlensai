@@ -169,7 +169,7 @@ async def test_run_answer_concurrent_contexts_isolated() -> None:
 
     import asyncio
 
-    from conftest import FakeChatProvider
+    from tests.conftest import FakeChatProvider
 
     ctx_a = AgentContext(chat=FakeChatProvider(text="ANSWER-A [1]"), retriever=None)
     ctx_b = AgentContext(chat=FakeChatProvider(text="ANSWER-B [1]"), retriever=None)

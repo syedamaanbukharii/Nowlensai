@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import EMBED_DIM, FakeChatProvider, FakeEmbeddingProvider
 from nowlens.ingestion.models import (
     Chunk,
     CrawlResult,
@@ -23,6 +22,7 @@ from nowlens.ingestion.stages.enrich import enrich_chunk, enrich_chunks
 from nowlens.ingestion.stages.extract import extract
 from nowlens.ingestion.stages.normalize import normalize
 from nowlens.ingestion.stages.validate import validate_embedded
+from tests.conftest import EMBED_DIM, FakeChatProvider, FakeEmbeddingProvider
 
 
 def _chunk(text: str, *, index: int = 0, metadata: dict | None = None) -> Chunk:

@@ -144,6 +144,16 @@ module = [
 ]
 ignore_missing_imports = true
 
+# numpy (a transitive dep) ships PEP 695 `type` statements in its stubs, which
+# mypy rejects as a syntax error when targeting python_version < 3.12. We never
+# use numpy directly, so skip following it entirely rather than parse its stubs
+# (ignore_missing_imports alone does not prevent parsing an installed package).
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+ignore_missing_imports = true
+
 # ----------------------------------------------------------------------------
 # pytest
 # ----------------------------------------------------------------------------
@@ -151,5 +161,5 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-ra -q"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 filterwarnings = ["ignore::DeprecationWarning"]
