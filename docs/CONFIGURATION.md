@@ -50,7 +50,11 @@ Connection-pool tuning for the async SQLAlchemy engine. The DSN itself stays at
 | `GROQ_BASE_URL` | str | `https://api.groq.com/openai/v1` | OpenAI-compatible |
 | `GROQ_API_KEY` | str? | — | Required when `PROVIDER=groq` |
 | `GROQ_CHAT_MODEL` | str | `llama-3.1-70b-versatile` | |
-| `EMBEDDING_DIM` | int | `768` | **Must match the embed model and the Qdrant collection size** |
+| `EMBEDDING_PROVIDER` | enum | `ollama` | Embedding backend, independent of `PROVIDER`: `ollama` \| `openai` |
+| `OPENAI_EMBED_BASE_URL` | str | `https://api.openai.com/v1` | OpenAI-compatible embeddings endpoint (OpenAI, Azure gateway, Together, vLLM…) |
+| `OPENAI_API_KEY` | str? | — | Required when `EMBEDDING_PROVIDER=openai` |
+| `OPENAI_EMBED_MODEL` | str | `text-embedding-3-small` | Must support the `dimensions` parameter (text-embedding-3-* family) |
+| `EMBEDDING_DIM` | int | `768` | **Must match the embed model and the Qdrant collection size**; sent as `dimensions` to the OpenAI embeddings API |
 
 ## Retrieval (`NOWLENS_RAG__…`)
 

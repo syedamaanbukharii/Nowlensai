@@ -15,6 +15,9 @@ from pydantic import Field, PostgresDsn, RedisDsn, field_validator, model_valida
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 LLMProviderName = Literal["ollama", "groq"]
+# Embedding backend, selected independently of the chat provider so a hosted
+# chat model (e.g. Groq) can be paired with local or hosted embeddings.
+EmbeddingProviderName = Literal["ollama", "openai"]
 Environment = Literal["development", "staging", "production"]
 
 # Built-in placeholder secrets that must never be used in production. Kept in one
@@ -53,6 +56,18 @@ class LLMSettings(BaseSettings):
     groq_base_url: str = "https://api.groq.com/openai/v1"
     groq_api_key: str | None = None
     groq_chat_model: str = "llama-3.1-70b-versatile"
+
+    # Embedding backend (independent of ``provider``). Defaults to Ollama so
+    # existing deployments are unaffected.
+    embedding_provider: EmbeddingProviderName = "ollama"
+
+    # OpenAI-compatible embeddings (OpenAI, Azure OpenAI gateways, Together,
+    # local vLLM, ...). Selected when ``embedding_provider == "openai"``.
+    openai_embed_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: str | None = None
+    # Must support OpenAI's ``dimensions`` parameter (the text-embedding-3-*
+    # family does) so the output matches ``embedding_dim`` below.
+    openai_embed_model: str = "text-embedding-3-small"
 
     # Embeddings dimensionality — must match the embedding model and the
     # Qdrant collection vector size. nomic-embed-text => 768.
