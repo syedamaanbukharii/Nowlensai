@@ -1,0 +1,6 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nowlens
+  labels:
+    app.kubernetes.io/name: nowlens

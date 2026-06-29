@@ -69,6 +69,19 @@ arq nowlens.workers.arq_worker.WorkerSettings
 
 The worker module is import-safe without arq installed (the queue settings are only constructed when arq is present), so the API and tests don't require it.
 
+## Kubernetes
+
+Cloud-agnostic manifests live in [`k8s/`](../k8s) (see [`k8s/README.md`](../k8s/README.md)). They cover the API and frontend Deployments + Services, a ConfigMap, a Secret template, an HPA, an Ingress, and a one-shot migration/bootstrap Job — applied with `kubectl apply -k k8s/`. Postgres, Qdrant, and Redis are referenced by URL and expected to be provided as managed services or deployed separately, which keeps the same manifests portable across EKS/AKS/GKE: only endpoints, the ingress class, and the image registry differ between clouds.
+
+```bash
+kubectl apply -f k8s/namespace.yaml
+kubectl -n nowlens create secret generic nowlens-secrets \
+  --from-literal=NOWLENS_SECURITY__JWT_SECRET="$(python -c 'import secrets;print(secrets.token_urlsafe(48))')" \
+  --from-literal=NOWLENS_DATABASE_URL="postgresql+asyncpg://user:pass@host:5432/nowlens"
+kubectl apply -k k8s/
+kubectl -n nowlens wait --for=condition=complete job/nowlens-migrate --timeout=300s
+```
+
 ## Scaling
 
 - **API** is stateless — run multiple replicas behind a load balancer. Provision Redis so the rate limiter shares state across replicas (otherwise each replica enforces its own budget).
