@@ -2,11 +2,11 @@
 
 Resolves the configured providers without exposing concrete classes to callers.
 
-* The *chat* provider follows ``NOWLENS_LLM_PROVIDER`` (ollama | groq).
-* The *embedding* provider is always Ollama, because Groq has no embeddings
-  endpoint. This keeps embeddings stable even when the chat backend is hosted,
-  and is the documented behaviour (see ``docs/ARCHITECTURE.md``). Adding a
-  hosted embedding provider later is a localised change here.
+* The *chat* provider follows ``NOWLENS_LLM__PROVIDER`` (ollama | groq).
+* The *embedding* provider follows ``NOWLENS_LLM__EMBEDDING_PROVIDER``
+  (ollama | openai), independently of the chat provider — so a hosted chat
+  backend (e.g. Groq, which has no embeddings endpoint) can be paired with
+  local Ollama or a hosted OpenAI-compatible embedding service.
 
 Providers are cached per-event-loop-process via :func:`functools.lru_cache`;
 they hold pooled ``httpx`` clients and should be closed on shutdown via
@@ -22,6 +22,7 @@ from nowlens.core.exceptions import ConfigurationError
 from nowlens.llm.base import EmbeddingProvider, LLMProvider
 from nowlens.llm.groq import GroqProvider
 from nowlens.llm.ollama import OllamaProvider
+from nowlens.llm.openai_embeddings import OpenAIEmbeddingProvider
 
 
 def _build_chat_provider(settings: Settings) -> LLMProvider:
@@ -50,16 +51,26 @@ def _build_chat_provider(settings: Settings) -> LLMProvider:
 
 def _build_embedding_provider(settings: Settings) -> EmbeddingProvider:
     cfg = settings.llm
-    # Reuse an Ollama instance for embeddings regardless of chat provider.
-    return OllamaProvider(
-        base_url=cfg.ollama_base_url,
-        chat_model=cfg.ollama_chat_model,
-        embed_model=cfg.ollama_embed_model,
-        embedding_dim=cfg.embedding_dim,
-        timeout_s=cfg.request_timeout_s,
-        max_retries=cfg.max_retries,
-        default_temperature=cfg.temperature,
-    )
+    if cfg.embedding_provider == "ollama":
+        return OllamaProvider(
+            base_url=cfg.ollama_base_url,
+            chat_model=cfg.ollama_chat_model,
+            embed_model=cfg.ollama_embed_model,
+            embedding_dim=cfg.embedding_dim,
+            timeout_s=cfg.request_timeout_s,
+            max_retries=cfg.max_retries,
+            default_temperature=cfg.temperature,
+        )
+    if cfg.embedding_provider == "openai":
+        return OpenAIEmbeddingProvider(
+            base_url=cfg.openai_embed_base_url,
+            api_key=cfg.openai_api_key,
+            model=cfg.openai_embed_model,
+            embedding_dim=cfg.embedding_dim,
+            timeout_s=cfg.request_timeout_s,
+            max_retries=cfg.max_retries,
+        )
+    raise ConfigurationError(f"Unknown embedding provider: {cfg.embedding_provider!r}")
 
 
 @lru_cache

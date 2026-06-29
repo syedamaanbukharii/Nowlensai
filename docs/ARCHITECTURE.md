@@ -4,7 +4,7 @@ NowLens is a retrieval-augmented, multi-agent system behind a typed FastAPI. Thi
 
 ## Goals and principles
 
-- **Provider-agnostic.** Business logic depends only on the `LLMProvider` / `EmbeddingProvider` interfaces (`nowlens.llm.base`). Ollama and Groq are concrete implementations selected by configuration; adding a backend is a factory change, never an application change.
+- **Provider-agnostic.** Business logic depends only on the `LLMProvider` / `EmbeddingProvider` interfaces (`nowlens.llm.base`). Chat (Ollama, Groq) and embeddings (Ollama, OpenAI-compatible) are selected independently by configuration — so a hosted chat model can pair with local or hosted embeddings; adding a backend is a factory change, never an application change.
 - **Grounded answers.** Generation is always paired with retrieval and citations, and a quality-assurance step checks grounding before an answer is returned. A degraded "no knowledge base" mode is explicit rather than silently hallucinated.
 - **Each stage independently testable.** Retrieval, ingestion, and the agent graph are wired from small, pure-where-possible units. The whole system runs offline against in-memory fakes (see the test suite).
 - **One place per concern.** Configuration lives in `core.config`; SQL lives in `db.repositories`; provider construction lives in `llm.factory` and the `services` composition root. Nothing reads `os.environ` directly.
