@@ -40,12 +40,16 @@ class HybridRetriever:
         lexical: LexicalRetriever,
         reranker: Reranker,
         settings: RAGSettings,
+        tenant_id: str | None = None,
     ) -> None:
         self._embedder = embedder
         self._vectors = vector_store
         self._lexical = lexical
         self._reranker = reranker
         self._cfg = settings
+        # Bound at construction (request scope) so every retrieval is scoped to
+        # the caller's tenant without the call sites having to pass it through.
+        self._tenant_id = tenant_id
 
     async def retrieve(
         self,
@@ -64,7 +68,10 @@ class HybridRetriever:
 
         t0 = time.perf_counter()
         vector_hits = await self._vectors.search(
-            query_vector, top_k=self._cfg.vector_top_k, domains=domains
+            query_vector,
+            top_k=self._cfg.vector_top_k,
+            domains=domains,
+            tenant_id=self._tenant_id,
         )
         metrics["vector_ms"] = round((time.perf_counter() - t0) * 1000, 2)
         metrics["vector_hits"] = len(vector_hits)
@@ -72,7 +79,7 @@ class HybridRetriever:
         # 2. Lexical search.
         t0 = time.perf_counter()
         lexical_hits = await self._lexical.search(
-            query, top_k=self._cfg.lexical_top_k, domains=domains
+            query, top_k=self._cfg.lexical_top_k, domains=domains, tenant_id=self._tenant_id
         )
         metrics["lexical_ms"] = round((time.perf_counter() - t0) * 1000, 2)
         metrics["lexical_hits"] = len(lexical_hits)

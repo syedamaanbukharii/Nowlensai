@@ -20,7 +20,7 @@ from nowlens.api.schemas import (
 )
 from nowlens.core.config import get_settings
 from nowlens.core.exceptions import AuthenticationError, ValidationError
-from nowlens.db.models import Role
+from nowlens.db.models import DEFAULT_TENANT_ID, Role
 from nowlens.db.repositories import AuditRepository, UserRepository
 from nowlens.security.audit import audit_event
 from nowlens.security.jwt import REFRESH, create_access_token, create_refresh_token, decode_token
@@ -44,18 +44,22 @@ async def register(payload: RegisterRequest, session: SessionDep, _: RateLimitDe
     if await users.get_by_email(payload.email) is not None:
         raise ValidationError("An account with this email already exists")
 
-    role = Role.ADMIN if await users.count() == 0 else Role.USER
+    # New accounts join the default tenant; the first account in a tenant is
+    # bootstrapped as its admin so a fresh deployment has an operator.
+    tenant_id = DEFAULT_TENANT_ID
+    role = Role.ADMIN if await users.count(tenant_id=tenant_id) == 0 else Role.USER
     user = await users.create(
         email=payload.email,
         hashed_password=hash_password(payload.password),
         role=role,
+        tenant_id=tenant_id,
     )
     await audit_event(
         actor=user.email,
         action="auth.register",
         target=user.id,
         detail={"role": str(role)},
-        repository=AuditRepository(session),
+        repository=AuditRepository(session, tenant_id),
     )
     return _token_response(user.id, str(user.role))
 
@@ -76,7 +80,7 @@ async def login(payload: LoginRequest, session: SessionDep, _: RateLimitDep) -> 
         actor=user.email,
         action="auth.login",
         target=user.id,
-        repository=AuditRepository(session),
+        repository=AuditRepository(session, user.tenant_id),
     )
     return _token_response(user.id, str(user.role))
 

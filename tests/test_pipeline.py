@@ -64,6 +64,7 @@ def _pipeline(
         embedder=FakeEmbeddingProvider(),
         vector_store=InMemoryVectorStore(),  # type: ignore[arg-type]
         expected_dim=EMBED_DIM,
+        tenant_id="tenant-test",
         crawler=crawler,  # type: ignore[arg-type]
         unchanged=unchanged,
         max_attempts=1,
@@ -78,6 +79,7 @@ async def test_pipeline_happy_path() -> None:
         embedder=FakeEmbeddingProvider(),
         vector_store=store,  # type: ignore[arg-type]
         expected_dim=EMBED_DIM,
+        tenant_id="tenant-test",
         crawler=crawler,  # type: ignore[arg-type]
         max_attempts=1,
     )

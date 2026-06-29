@@ -29,10 +29,10 @@ except Exception:  # noqa: BLE001 - any import failure means "arq not available"
     RedisSettings = None
 
 
-async def ingest(ctx: dict[str, Any], job_id: str, url: str) -> str:
+async def ingest(ctx: dict[str, Any], job_id: str, url: str, tenant_id: str) -> str:
     """arq task entrypoint: process one ingestion job."""
 
-    report = await run_ingestion_job(job_id, url)
+    report = await run_ingestion_job(job_id, url, tenant_id)
     return "skipped" if report.skipped else ("success" if report.success else "failed")
 
 

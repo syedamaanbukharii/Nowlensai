@@ -150,6 +150,19 @@ async def current_user(
 CurrentUser = Annotated[User, Depends(current_user)]
 
 
+async def current_tenant_id(user: CurrentUser) -> str:
+    """Resolve the active tenant from the authenticated user.
+
+    Tenant membership lives on the user record, so it travels with the
+    authenticated identity without any extra token claims or headers.
+    """
+
+    return user.tenant_id
+
+
+CurrentTenantId = Annotated[str, Depends(current_tenant_id)]
+
+
 def require_role(minimum: Role) -> Callable[[User], Awaitable[User]]:
     """Return a dependency enforcing ``minimum`` role on the current user."""
 
@@ -164,16 +177,18 @@ RequireOperator = Annotated[User, Depends(require_role(Role.OPERATOR))]
 RequireAdmin = Annotated[User, Depends(require_role(Role.ADMIN))]
 
 
-async def get_retriever(session: SessionDep) -> HybridRetriever:
-    return build_retriever(session)
+async def get_retriever(session: SessionDep, tenant_id: CurrentTenantId) -> HybridRetriever:
+    return build_retriever(session, tenant_id)
 
 
-async def get_agent_context(session: SessionDep) -> AgentContext:
-    return build_agent_context(session)
+async def get_agent_context(session: SessionDep, tenant_id: CurrentTenantId) -> AgentContext:
+    return build_agent_context(session, tenant_id)
 
 
-async def get_ingestion_pipeline(session: SessionDep) -> AsyncIterator[IngestionPipeline]:
-    pipeline = build_ingestion_pipeline(session)
+async def get_ingestion_pipeline(
+    session: SessionDep, tenant_id: CurrentTenantId
+) -> AsyncIterator[IngestionPipeline]:
+    pipeline = build_ingestion_pipeline(session, tenant_id)
     try:
         yield pipeline
     finally:

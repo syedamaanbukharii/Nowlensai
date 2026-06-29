@@ -71,7 +71,8 @@ async def ingest(
 ) -> IngestInlineResponse | IngestEnqueueResponse:
     """Submit URLs for ingestion (inline when ``wait`` else enqueued)."""
 
-    jobs = IngestionJobRepository(session)
+    tenant_id = operator.tenant_id
+    jobs = IngestionJobRepository(session, tenant_id)
     urls = [str(u) for u in payload.urls]
     job_ids = [(await jobs.create(url)).id for url in urls]
 
@@ -79,7 +80,7 @@ async def ingest(
         actor=operator.email,
         action="ingestion.submit",
         detail={"urls": len(urls), "wait": payload.wait},
-        repository=AuditRepository(session),
+        repository=AuditRepository(session, tenant_id),
     )
 
     if payload.wait:
@@ -105,35 +106,42 @@ async def ingest(
 
     # Enqueue: run each job in a background task (its own DB session).
     for job_id, url in zip(job_ids, urls, strict=True):
-        background.add_task(run_ingestion_job, job_id, url)
+        background.add_task(run_ingestion_job, job_id, url, tenant_id)
     return IngestEnqueueResponse(enqueued=urls, job_ids=job_ids)
 
 
 @router.get("/documents", response_model=list[DocumentOut])
 async def list_documents(
-    _: RequireOperator, session: SessionDep, limit: int = 50
+    operator: RequireOperator, session: SessionDep, limit: int = 50
 ) -> list[DocumentOut]:
-    rows = await DocumentRepository(session).list_recent(limit=min(max(limit, 1), 200))
+    rows = await DocumentRepository(session, operator.tenant_id).list_recent(
+        limit=min(max(limit, 1), 200)
+    )
     return [DocumentOut.model_validate(row) for row in rows]
 
 
 @router.get("/jobs", response_model=list[JobOut])
-async def list_jobs(_: RequireOperator, session: SessionDep, limit: int = 50) -> list[JobOut]:
-    rows = await IngestionJobRepository(session).list_recent(limit=min(max(limit, 1), 200))
+async def list_jobs(
+    operator: RequireOperator, session: SessionDep, limit: int = 50
+) -> list[JobOut]:
+    rows = await IngestionJobRepository(session, operator.tenant_id).list_recent(
+        limit=min(max(limit, 1), 200)
+    )
     return [JobOut.model_validate(row) for row in rows]
 
 
 @router.delete("/documents/{document_id}", status_code=204)
 async def delete_document(document_id: str, admin: RequireAdmin, session: SessionDep) -> None:
-    documents = DocumentRepository(session)
+    tenant_id = admin.tenant_id
+    documents = DocumentRepository(session, tenant_id)
     if await documents.get(document_id) is None:
         raise NotFoundError("Document not found")
 
-    await ChunkRepository(session).delete_for_document(document_id)
+    await ChunkRepository(session, tenant_id).delete_for_document(document_id)
     await documents.delete(document_id)
     # Remove vectors from Qdrant (best-effort; the metadata is already gone).
     try:
-        await get_vector_store().delete_document(document_id)
+        await get_vector_store().delete_document(document_id, tenant_id=tenant_id)
     except Exception as exc:  # noqa: BLE001 - log, the row deletion already succeeded
         log.warning("ingestion.vector_delete_failed", document_id=document_id, error=str(exc))
 
@@ -141,5 +149,5 @@ async def delete_document(document_id: str, admin: RequireAdmin, session: Sessio
         actor=admin.email,
         action="ingestion.delete_document",
         target=document_id,
-        repository=AuditRepository(session),
+        repository=AuditRepository(session, tenant_id),
     )

@@ -44,8 +44,8 @@ def get_reranker() -> Reranker:
     )
 
 
-def build_retriever(session: AsyncSession) -> HybridRetriever:
-    """Hybrid retriever using Postgres FTS as the lexical leg for this session."""
+def build_retriever(session: AsyncSession, tenant_id: str) -> HybridRetriever:
+    """Hybrid retriever using Postgres FTS as the lexical leg, scoped to a tenant."""
 
     settings = get_settings()
     return HybridRetriever(
@@ -54,26 +54,28 @@ def build_retriever(session: AsyncSession) -> HybridRetriever:
         lexical=PostgresFTSRetriever(session),
         reranker=get_reranker(),
         settings=settings.rag,
+        tenant_id=tenant_id,
     )
 
 
-def build_agent_context(session: AsyncSession) -> AgentContext:
-    return AgentContext(chat=get_chat_provider(), retriever=build_retriever(session))
+def build_agent_context(session: AsyncSession, tenant_id: str) -> AgentContext:
+    return AgentContext(chat=get_chat_provider(), retriever=build_retriever(session, tenant_id))
 
 
-def build_ingestion_pipeline(session: AsyncSession) -> IngestionPipeline:
+def build_ingestion_pipeline(session: AsyncSession, tenant_id: str) -> IngestionPipeline:
     """Pipeline wired to persist chunk metadata and honour incremental skips."""
 
     settings = get_settings()
-    documents = DocumentRepository(session)
+    documents = DocumentRepository(session, tenant_id)
     ai_cleaner = AICleaner(get_chat_provider()) if settings.ingestion.ai_cleaning else None
     return IngestionPipeline(
         settings=settings.ingestion,
         embedder=get_embedding_provider(),
         vector_store=get_vector_store(),
         expected_dim=settings.llm.embedding_dim,
+        tenant_id=tenant_id,
         ai_cleaner=ai_cleaner,
-        chunk_sink=ChunkRepository(session),
+        chunk_sink=ChunkRepository(session, tenant_id),
         unchanged=documents.is_unchanged,
     )
 

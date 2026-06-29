@@ -48,6 +48,9 @@ class QdrantVectorStore:
                 )
                 # Payload indexes that we filter on frequently.
                 await self._client.create_payload_index(
+                    self._collection, "tenant_id", models.PayloadSchemaType.KEYWORD
+                )
+                await self._client.create_payload_index(
                     self._collection, "domains", models.PayloadSchemaType.KEYWORD
                 )
                 await self._client.create_payload_index(
@@ -85,17 +88,18 @@ class QdrantVectorStore:
         *,
         top_k: int,
         domains: Sequence[str] | None = None,
+        tenant_id: str | None = None,
     ) -> list[RetrievedChunk]:
-        query_filter = None
-        if domains:
-            query_filter = models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="domains",
-                        match=models.MatchAny(any=list(domains)),
-                    )
-                ]
+        conditions: list[models.FieldCondition] = []
+        if tenant_id is not None:
+            conditions.append(
+                models.FieldCondition(key="tenant_id", match=models.MatchValue(value=tenant_id))
             )
+        if domains:
+            conditions.append(
+                models.FieldCondition(key="domains", match=models.MatchAny(any=list(domains)))
+            )
+        query_filter = models.Filter(must=conditions) if conditions else None
         try:
             hits = await self._client.search(  # type: ignore[attr-defined]
                 collection_name=self._collection,
@@ -163,20 +167,18 @@ class QdrantVectorStore:
             raise RetrievalError(f"Qdrant scroll failed: {exc}") from exc
         return results
 
-    async def delete_document(self, document_id: str) -> None:
+    async def delete_document(self, document_id: str, *, tenant_id: str | None = None) -> None:
+        conditions = [
+            models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))
+        ]
+        if tenant_id is not None:
+            conditions.append(
+                models.FieldCondition(key="tenant_id", match=models.MatchValue(value=tenant_id))
+            )
         try:
             await self._client.delete(
                 collection_name=self._collection,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="document_id",
-                                match=models.MatchValue(value=document_id),
-                            )
-                        ]
-                    )
-                ),
+                points_selector=models.FilterSelector(filter=models.Filter(must=conditions)),
                 wait=True,
             )
         except Exception as exc:

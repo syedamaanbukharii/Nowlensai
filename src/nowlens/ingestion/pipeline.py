@@ -60,6 +60,7 @@ class IngestionPipeline:
         embedder: EmbeddingProvider,
         vector_store: QdrantVectorStore,
         expected_dim: int,
+        tenant_id: str,
         crawler: Crawler | None = None,
         renderer: Renderer | None = None,
         ai_cleaner: AICleaner | None = None,
@@ -71,6 +72,7 @@ class IngestionPipeline:
         self._embedder = embedder
         self._vectors = vector_store
         self._expected_dim = expected_dim
+        self._tenant_id = tenant_id
         self._crawler = crawler or Crawler(settings)
         self._renderer = renderer or Renderer(settings)
         self._ai_cleaner = ai_cleaner
@@ -169,7 +171,9 @@ class IngestionPipeline:
         )
 
         # 10. Index.
-        indexed = await index_chunks(valid, self._vectors, sink=self._sink)
+        indexed = await index_chunks(
+            valid, self._vectors, tenant_id=self._tenant_id, sink=self._sink
+        )
         report.chunks_indexed = indexed
         report.record(StageOutcome("index", ok=indexed > 0, items=indexed))
 

@@ -4,6 +4,12 @@ Keeping persistence logic here (rather than in routers or the pipeline) means
 the ingestion :class:`~nowlens.ingestion.stages.index.ChunkSink` protocol, the
 chat history endpoints, and the admin views all share one well-tested data
 access layer.
+
+**Tenant isolation.** Every tenant-scoped repository is constructed with a
+``tenant_id`` and scopes all of its reads and writes to it, so a caller can
+never reach another tenant's rows through these classes. :class:`UserRepository`
+is deliberately *not* tenant-bound: login resolves a user by globally-unique
+email before any tenant is known, and the tenant is then read from the user.
 """
 
 from __future__ import annotations
@@ -16,6 +22,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nowlens.db.models import (
+    DEFAULT_TENANT_ID,
     AuditLog,
     ChatSession,
     Document,
@@ -24,6 +31,7 @@ from nowlens.db.models import (
     JobStatus,
     Message,
     Role,
+    Tenant,
     User,
 )
 from nowlens.ingestion.models import EmbeddedChunk
@@ -33,6 +41,42 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+class TenantRepository:
+    """The tenant catalogue. Not itself tenant-scoped."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, tenant_id: str) -> Tenant | None:
+        return await self._session.get(Tenant, tenant_id)
+
+    async def get_by_slug(self, slug: str) -> Tenant | None:
+        return await self._session.scalar(select(Tenant).where(Tenant.slug == slug.lower()))
+
+    async def create(self, *, slug: str, name: str = "") -> Tenant:
+        tenant = Tenant(slug=slug.lower(), name=name or slug)
+        self._session.add(tenant)
+        await self._session.flush()
+        return tenant
+
+    async def ensure_default(self) -> Tenant:
+        """Idempotently ensure the seed ``default`` tenant exists."""
+
+        existing = await self.get(DEFAULT_TENANT_ID)
+        if existing is not None:
+            return existing
+        tenant = Tenant(id=DEFAULT_TENANT_ID, slug="default", name="Default")
+        self._session.add(tenant)
+        await self._session.flush()
+        return tenant
+
+    async def list_all(self, *, limit: int = 100) -> list[Tenant]:
+        rows = await self._session.scalars(
+            select(Tenant).order_by(Tenant.created_at.desc()).limit(limit)
+        )
+        return list(rows)
+
+
 class ChunkRepository:
     """Persists chunk metadata; implements the ingestion ``ChunkSink`` protocol.
 
@@ -40,8 +84,9 @@ class ChunkRepository:
     the Postgres full-text retriever and admin views have a row per chunk.
     """
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: str) -> None:
         self._session = session
+        self._tenant_id = tenant_id
 
     async def upsert_chunks(self, embedded: list[EmbeddedChunk]) -> int:
         if not embedded:
@@ -53,6 +98,7 @@ class ChunkRepository:
             rows.append(
                 {
                     "chunk_id": chunk.chunk_id,
+                    "tenant_id": self._tenant_id,
                     "document_id": chunk.document_id,
                     "text": chunk.text,
                     "title": md.get("title", ""),
@@ -72,7 +118,7 @@ class ChunkRepository:
         update_cols = {
             c.name: stmt.excluded[c.name]
             for c in DocumentChunk.__table__.columns
-            if c.name not in {"chunk_id", "created_at", "tsv"}
+            if c.name not in {"chunk_id", "created_at", "tsv", "tenant_id"}
         }
         stmt = stmt.on_conflict_do_update(index_elements=["chunk_id"], set_=update_cols)
         await self._session.execute(stmt)
@@ -80,18 +126,25 @@ class ChunkRepository:
 
     async def delete_for_document(self, document_id: str) -> int:
         result = await self._session.execute(
-            delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
+            delete(DocumentChunk).where(
+                DocumentChunk.document_id == document_id,
+                DocumentChunk.tenant_id == self._tenant_id,
+            )
         )
         return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
 
 class DocumentRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: str) -> None:
         self._session = session
+        self._tenant_id = tenant_id
 
     async def content_hash_for(self, url: str) -> str | None:
-        row = await self._session.scalar(select(Document.content_hash).where(Document.url == url))
-        return row
+        return await self._session.scalar(
+            select(Document.content_hash).where(
+                Document.url == url, Document.tenant_id == self._tenant_id
+            )
+        )
 
     async def is_unchanged(self, url: str, content_hash: str) -> bool:
         """Predicate for incremental ingestion (matches ``UnchangedPredicate``)."""
@@ -103,6 +156,7 @@ class DocumentRepository:
         self, *, url: str, title: str, content_hash: str, domains: Sequence[str], chunk_count: int
     ) -> Document:
         insert_stmt = pg_insert(Document).values(
+            tenant_id=self._tenant_id,
             url=url,
             title=title,
             content_hash=content_hash,
@@ -111,7 +165,7 @@ class DocumentRepository:
             last_ingested_at=_now(),
         )
         stmt = insert_stmt.on_conflict_do_update(
-            index_elements=["url"],
+            index_elements=["tenant_id", "url"],
             set_={
                 "title": insert_stmt.excluded.title,
                 "content_hash": insert_stmt.excluded.content_hash,
@@ -124,74 +178,118 @@ class DocumentRepository:
 
     async def list_recent(self, *, limit: int = 50) -> list[Document]:
         rows = await self._session.scalars(
-            select(Document).order_by(Document.last_ingested_at.desc()).limit(limit)
+            select(Document)
+            .where(Document.tenant_id == self._tenant_id)
+            .order_by(Document.last_ingested_at.desc())
+            .limit(limit)
         )
         return list(rows)
 
     async def count(self) -> int:
-        return int(await self._session.scalar(select(func.count()).select_from(Document)) or 0)
+        return int(
+            await self._session.scalar(
+                select(func.count())
+                .select_from(Document)
+                .where(Document.tenant_id == self._tenant_id)
+            )
+            or 0
+        )
 
     async def get(self, document_id: str) -> Document | None:
-        return await self._session.get(Document, document_id)
+        return await self._session.scalar(
+            select(Document).where(
+                Document.id == document_id, Document.tenant_id == self._tenant_id
+            )
+        )
 
     async def delete(self, document_id: str) -> None:
         """Delete a document row. Cascades to its chunks via the FK constraint."""
 
-        await self._session.execute(delete(Document).where(Document.id == document_id))
+        await self._session.execute(
+            delete(Document).where(
+                Document.id == document_id, Document.tenant_id == self._tenant_id
+            )
+        )
 
 
 class SessionRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: str) -> None:
         self._session = session
+        self._tenant_id = tenant_id
 
     async def create(self, *, user_id: str | None, title: str = "New conversation") -> ChatSession:
-        chat = ChatSession(user_id=user_id, title=title)
+        chat = ChatSession(tenant_id=self._tenant_id, user_id=user_id, title=title)
         self._session.add(chat)
         await self._session.flush()
         return chat
 
     async def get(self, session_id: str) -> ChatSession | None:
-        return await self._session.get(ChatSession, session_id)
+        return await self._session.scalar(
+            select(ChatSession).where(
+                ChatSession.id == session_id, ChatSession.tenant_id == self._tenant_id
+            )
+        )
 
     async def list_for_user(self, user_id: str | None, *, limit: int = 50) -> list[ChatSession]:
-        stmt = select(ChatSession).order_by(ChatSession.updated_at.desc()).limit(limit)
+        stmt = (
+            select(ChatSession)
+            .where(ChatSession.tenant_id == self._tenant_id)
+            .order_by(ChatSession.updated_at.desc())
+            .limit(limit)
+        )
         stmt = stmt.where(ChatSession.user_id == user_id) if user_id else stmt
         return list(await self._session.scalars(stmt))
 
     async def touch(self, session_id: str) -> None:
         await self._session.execute(
-            update(ChatSession).where(ChatSession.id == session_id).values(updated_at=_now())
+            update(ChatSession)
+            .where(ChatSession.id == session_id, ChatSession.tenant_id == self._tenant_id)
+            .values(updated_at=_now())
         )
 
     async def delete(self, session_id: str) -> None:
-        await self._session.execute(delete(ChatSession).where(ChatSession.id == session_id))
+        await self._session.execute(
+            delete(ChatSession).where(
+                ChatSession.id == session_id, ChatSession.tenant_id == self._tenant_id
+            )
+        )
 
 
 class MessageRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: str) -> None:
         self._session = session
+        self._tenant_id = tenant_id
 
     async def add(
         self, *, session_id: str, role: str, content: str, meta: dict | None = None
     ) -> Message:
-        msg = Message(session_id=session_id, role=role, content=content, meta=meta or {})
+        msg = Message(
+            tenant_id=self._tenant_id,
+            session_id=session_id,
+            role=role,
+            content=content,
+            meta=meta or {},
+        )
         self._session.add(msg)
         await self._session.flush()
         return msg
 
     async def list_for_session(self, session_id: str) -> list[Message]:
         rows = await self._session.scalars(
-            select(Message).where(Message.session_id == session_id).order_by(Message.created_at)
+            select(Message)
+            .where(Message.session_id == session_id, Message.tenant_id == self._tenant_id)
+            .order_by(Message.created_at)
         )
         return list(rows)
 
 
 class IngestionJobRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: str) -> None:
         self._session = session
+        self._tenant_id = tenant_id
 
     async def create(self, url: str) -> IngestionJob:
-        job = IngestionJob(url=url, status=JobStatus.PENDING.value)
+        job = IngestionJob(tenant_id=self._tenant_id, url=url, status=JobStatus.PENDING.value)
         self._session.add(job)
         await self._session.flush()
         return job
@@ -208,7 +306,7 @@ class IngestionJobRepository:
     ) -> None:
         await self._session.execute(
             update(IngestionJob)
-            .where(IngestionJob.id == job_id)
+            .where(IngestionJob.id == job_id, IngestionJob.tenant_id == self._tenant_id)
             .values(
                 status=status.value,
                 detail=detail,
@@ -221,12 +319,17 @@ class IngestionJobRepository:
 
     async def list_recent(self, *, limit: int = 50) -> list[IngestionJob]:
         rows = await self._session.scalars(
-            select(IngestionJob).order_by(IngestionJob.created_at.desc()).limit(limit)
+            select(IngestionJob)
+            .where(IngestionJob.tenant_id == self._tenant_id)
+            .order_by(IngestionJob.created_at.desc())
+            .limit(limit)
         )
         return list(rows)
 
 
 class UserRepository:
+    """Not tenant-bound: email is globally unique and resolves the tenant."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -236,19 +339,37 @@ class UserRepository:
     async def get(self, user_id: str) -> User | None:
         return await self._session.get(User, user_id)
 
-    async def create(self, *, email: str, hashed_password: str, role: Role = Role.USER) -> User:
-        user = User(email=email.lower(), hashed_password=hashed_password, role=role.value)
+    async def create(
+        self,
+        *,
+        email: str,
+        hashed_password: str,
+        role: Role = Role.USER,
+        tenant_id: str = DEFAULT_TENANT_ID,
+    ) -> User:
+        user = User(
+            email=email.lower(),
+            hashed_password=hashed_password,
+            role=role.value,
+            tenant_id=tenant_id,
+        )
         self._session.add(user)
         await self._session.flush()
         return user
 
-    async def count(self) -> int:
-        return int(await self._session.scalar(select(func.count()).select_from(User)) or 0)
+    async def count(self, *, tenant_id: str) -> int:
+        return int(
+            await self._session.scalar(
+                select(func.count()).select_from(User).where(User.tenant_id == tenant_id)
+            )
+            or 0
+        )
 
 
 class AuditRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, tenant_id: str) -> None:
         self._session = session
+        self._tenant_id = tenant_id
 
     async def record(
         self,
@@ -261,6 +382,7 @@ class AuditRepository:
     ) -> None:
         self._session.add(
             AuditLog(
+                tenant_id=self._tenant_id,
                 actor=actor,
                 action=action,
                 target=target,
@@ -271,6 +393,9 @@ class AuditRepository:
 
     async def list_recent(self, *, limit: int = 100) -> list[AuditLog]:
         rows = await self._session.scalars(
-            select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)
+            select(AuditLog)
+            .where(AuditLog.tenant_id == self._tenant_id)
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit)
         )
         return list(rows)

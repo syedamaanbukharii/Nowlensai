@@ -42,23 +42,23 @@ def status_for_report(report: IngestionReport) -> JobStatus:
     return JobStatus.SUCCEEDED if report.success else JobStatus.FAILED
 
 
-async def run_ingestion_job(job_id: str, url: str) -> IngestionReport:
+async def run_ingestion_job(job_id: str, url: str, tenant_id: str) -> IngestionReport:
     """Run the ingestion pipeline for ``url`` and persist the job outcome."""
 
     async with session_scope() as session:
-        jobs = IngestionJobRepository(session)
+        jobs = IngestionJobRepository(session, tenant_id)
         await jobs.mark(job_id, status=JobStatus.RUNNING)
 
     # Fresh session for the actual work so the RUNNING marker is committed first
     # (gives the admin UI immediate feedback while a long crawl proceeds).
     async with session_scope() as session:
-        pipeline = build_ingestion_pipeline(session)
+        pipeline = build_ingestion_pipeline(session, tenant_id)
         try:
             report = await pipeline.ingest_url(url)
         finally:
             await pipeline.aclose()
 
-        jobs = IngestionJobRepository(session)
+        jobs = IngestionJobRepository(session, tenant_id)
         await jobs.mark(
             job_id,
             status=status_for_report(report),
