@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 from nowlens.core.config import IngestionSettings
 from nowlens.core.logging import get_logger
 from nowlens.ingestion.models import (
+    CrawlResult,
     IngestionReport,
     StageOutcome,
     content_hash,
@@ -172,7 +173,7 @@ class IngestionPipeline:
         report.chunks_indexed = indexed
         report.record(StageOutcome("index", ok=indexed > 0, items=indexed))
 
-    async def _crawl_with_retry(self, url: str, report: IngestionReport):  # type: ignore[no-untyped-def]
+    async def _crawl_with_retry(self, url: str, report: IngestionReport) -> CrawlResult | None:
         last_error = "unknown"
         for attempt in range(1, self._max_attempts + 1):
             result = await self._crawler.fetch(url)

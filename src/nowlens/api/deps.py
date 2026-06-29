@@ -18,7 +18,7 @@ in-process state, and the dependency reflects that without failing requests.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from functools import lru_cache
 from typing import Annotated
@@ -150,7 +150,7 @@ async def current_user(
 CurrentUser = Annotated[User, Depends(current_user)]
 
 
-def require_role(minimum: Role):  # type: ignore[no-untyped-def]
+def require_role(minimum: Role) -> Callable[[User], Awaitable[User]]:
     """Return a dependency enforcing ``minimum`` role on the current user."""
 
     async def _dependency(user: CurrentUser) -> User:

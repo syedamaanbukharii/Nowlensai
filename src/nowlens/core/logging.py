@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
 from typing import Any
 
 import structlog
@@ -18,6 +19,7 @@ from nowlens.core.config import get_settings
 from nowlens.core.tracing import get_trace_id
 
 _configured = False
+_config_lock = threading.Lock()
 
 
 def _add_trace_id(_: Any, __: str, event_dict: dict[str, Any]) -> dict[str, Any]:
@@ -34,6 +36,17 @@ def configure_logging() -> None:
     if _configured:
         return
 
+    # Double-checked locking: the fast path above avoids the lock once
+    # configured; the lock guards the one-time setup against concurrent callers
+    # (e.g. multiple worker threads logging during startup).
+    with _config_lock:
+        if _configured:
+            return
+        _configure_locked()
+        _configured = True
+
+
+def _configure_locked() -> None:
     settings = get_settings().observability
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
 
@@ -70,7 +83,6 @@ def configure_logging() -> None:
         level=level,
         force=True,
     )
-    _configured = True
 
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:

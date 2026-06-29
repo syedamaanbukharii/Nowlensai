@@ -12,6 +12,7 @@ from fastapi import APIRouter, status
 from nowlens.api.deps import CurrentUser, SessionDep
 from nowlens.api.schemas import MessageOut, SessionOut
 from nowlens.core.exceptions import NotFoundError
+from nowlens.db.models import ChatSession
 from nowlens.db.repositories import MessageRepository, SessionRepository
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -29,7 +30,7 @@ async def create_session(user: CurrentUser, session: SessionDep) -> SessionOut:
     return SessionOut.model_validate(row)
 
 
-async def _owned_session(repo: SessionRepository, session_id: str, user_id: str):  # type: ignore[no-untyped-def]
+async def _owned_session(repo: SessionRepository, session_id: str, user_id: str) -> ChatSession:
     row = await repo.get(session_id)
     if row is None or row.user_id != user_id:
         raise NotFoundError("Session not found")
