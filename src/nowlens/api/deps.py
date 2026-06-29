@@ -29,9 +29,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nowlens.agents.base import AgentContext
 from nowlens.core.config import Settings, get_settings
-from nowlens.core.exceptions import AuthenticationError, RateLimitError
+from nowlens.core.exceptions import AuthenticationError, AuthorizationError, RateLimitError
 from nowlens.core.logging import get_logger
-from nowlens.db.models import Role, User
+from nowlens.db.models import DEFAULT_TENANT_ID, Role, User
 from nowlens.db.repositories import UserRepository
 from nowlens.db.session import get_session
 from nowlens.ingestion.pipeline import IngestionPipeline
@@ -175,6 +175,23 @@ def require_role(minimum: Role) -> Callable[[User], Awaitable[User]]:
 
 RequireOperator = Annotated[User, Depends(require_role(Role.OPERATOR))]
 RequireAdmin = Annotated[User, Depends(require_role(Role.ADMIN))]
+
+
+async def platform_admin(user: CurrentUser) -> User:
+    """Authorise platform-level (cross-tenant) administration.
+
+    Restricted to admins of the seed/default tenant, which acts as the platform
+    operator workspace. A tenant's own admin manages only their tenant's data
+    and cannot create or enumerate other tenants.
+    """
+
+    ensure_role(user.role, Role.ADMIN)
+    if user.tenant_id != DEFAULT_TENANT_ID:
+        raise AuthorizationError("Platform administration is restricted to the default tenant")
+    return user
+
+
+PlatformAdmin = Annotated[User, Depends(platform_admin)]
 
 
 async def get_retriever(session: SessionDep, tenant_id: CurrentTenantId) -> HybridRetriever:

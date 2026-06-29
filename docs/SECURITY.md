@@ -22,7 +22,17 @@ Roles are ranked `viewer (0) < user (1) < operator (2) < admin (3)` (`security.r
 
 - **user** — chat, search, sessions, domains.
 - **operator** — ingestion submission, document/job listing, the config snapshot.
-- **admin** — document deletion (and is the default for the first user).
+- **admin** — document deletion (and is the default for the first user in a tenant).
+
+## Multi-tenancy & data isolation
+
+Every tenant-scoped table (`users`, `chat_sessions`, `messages`, `documents`, `document_chunks`, `ingestion_jobs`, `audit_logs`) carries a non-null `tenant_id`. Isolation is enforced in depth:
+
+- **Repositories** are constructed with a `tenant_id` and filter every read and write by it (`db.repositories`). A repository for tenant A cannot read, update, or delete tenant B's rows — covered by `tests/test_tenancy.py`.
+- **Retrieval** is tenant-bound: Qdrant searches filter on an indexed `tenant_id` payload field, and the Postgres full-text query adds a tenant predicate, so a tenant only ever retrieves its own indexed documentation.
+- **Tenant resolution** comes from the authenticated user's record (`deps.current_tenant_id`), so it travels with the verified identity — there is no client-supplied tenant header to spoof. The JWT format is unchanged.
+- **Email is globally unique**, so login-by-email is unambiguous and the tenant is derived from the resolved user.
+- **Platform vs tenant admin.** Tenant creation and cross-tenant user provisioning (`/api/v1/tenants`) are restricted to **platform admins** — admins of the seed `default` tenant (`deps.platform_admin`). A tenant's own admin manages only their tenant's data through the regular, already-scoped endpoints.
 
 ## Rate limiting
 
