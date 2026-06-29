@@ -13,6 +13,7 @@ singletons, and the database engine are released on shutdown.
 
 from __future__ import annotations
 
+import math
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -22,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from nowlens import __version__
-from nowlens.api.middleware import ObservabilityMiddleware
+from nowlens.api.middleware import ObservabilityMiddleware, SecurityHeadersMiddleware
 from nowlens.api.routers import api_router, health_router, metrics_router
 from nowlens.api.schemas import ErrorOut
 from nowlens.core.config import Settings, get_settings
@@ -79,7 +80,12 @@ def _register_exception_handlers(app: FastAPI) -> None:
         # 5xx are unexpected enough to warrant a stack; 4xx are client errors.
         if exc.status_code >= 500:
             log.error("error.domain", code=exc.code, message=exc.message)
-        return _error_response(exc.status_code, exc.code, exc.message)
+        response = _error_response(exc.status_code, exc.code, exc.message)
+        # RFC 6585: advertise when a rate-limited client may retry.
+        retry_after = getattr(exc, "retry_after", None)
+        if retry_after is not None:
+            response.headers["Retry-After"] = str(max(1, math.ceil(retry_after)))
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def _handle_validation(_: Request, exc: RequestValidationError) -> JSONResponse:
@@ -116,16 +122,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Trace ids + access logs + HTTP metrics (added last → outermost).
+    # Middleware is applied bottom-up, so the last added is the outermost.
+    # Order (outermost → innermost): CORS → Observability → SecurityHeaders.
+    app.add_middleware(SecurityHeadersMiddleware, enable_hsts=settings.is_production)
+    app.add_middleware(ObservabilityMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["X-Trace-Id"],
+        # Explicit allow-lists rather than wildcards: only the verbs and headers
+        # the API actually uses, so the cross-origin surface stays minimal.
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Trace-Id"],
+        expose_headers=["X-Trace-Id", "Retry-After"],
     )
-    app.add_middleware(ObservabilityMiddleware)
 
     _register_exception_handlers(app)
 

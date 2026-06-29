@@ -11,11 +11,21 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Annotated, Literal, cast
 
-from pydantic import Field, PostgresDsn, RedisDsn, field_validator
+from pydantic import Field, PostgresDsn, RedisDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 LLMProviderName = Literal["ollama", "groq"]
 Environment = Literal["development", "staging", "production"]
+
+# Built-in placeholder secrets that must never be used in production. Kept in one
+# place so the production guard and any tests reference the same values.
+WEAK_JWT_SECRETS = frozenset(
+    {
+        "change-me-in-production-this-is-not-secret",
+        "dev-insecure-change-me",
+    }
+)
+MIN_PRODUCTION_SECRET_LEN = 32
 
 
 class LLMSettings(BaseSettings):
@@ -90,6 +100,9 @@ class IngestionSettings(BaseSettings):
     render_javascript: bool = False
     # Enable AI-assisted cleaning (uses the configured LLM).
     ai_cleaning: bool = True
+    # Hard cap on a single fetched response body (defence against huge/malicious
+    # pages exhausting memory). Bodies over this are rejected, not truncated.
+    max_document_bytes: int = 5_000_000
 
 
 class SecuritySettings(BaseSettings):
@@ -159,6 +172,25 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
+    @model_validator(mode="after")
+    def _enforce_production_security(self) -> Settings:
+        """Fail closed if production is configured with an insecure JWT secret.
+
+        Stateless JWTs are only as trustworthy as the signing secret; a default
+        or short secret means every token is forgeable. We refuse to start in
+        production rather than serve forgeable tokens.
+        """
+
+        if self.environment == "production":
+            secret = self.security.jwt_secret
+            if secret in WEAK_JWT_SECRETS or len(secret) < MIN_PRODUCTION_SECRET_LEN:
+                raise ValueError(
+                    "NOWLENS_SECURITY__JWT_SECRET must be a strong secret of at least "
+                    f"{MIN_PRODUCTION_SECRET_LEN} characters in production; the built-in "
+                    "placeholder value is not permitted."
+                )
+        return self
 
     @property
     def is_production(self) -> bool:

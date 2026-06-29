@@ -79,20 +79,36 @@ def _get_limiter() -> RateLimiter:
     return RateLimiter.from_settings(get_settings().security, redis=_get_redis())
 
 
-async def rate_limit(request: Request) -> None:
-    """Enforce the per-client request budget.
+def _rate_limit_identity(request: Request) -> str:
+    """Stable rate-limit identity: the token subject, else the client IP.
 
-    Identity is the authenticated subject when present, else the client IP.
+    Keying on the raw ``Authorization`` header is wrong because the token
+    rotates on every refresh, which would reset a user's budget. We decode the
+    bearer access token (best effort) and key on its subject so the limit
+    follows the user across token refreshes; unauthenticated/invalid requests
+    fall back to the client IP.
     """
 
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+        try:
+            return f"user:{decode_token(token, expected_type=ACCESS).subject}"
+        except AuthenticationError:
+            pass
+    client_host = request.client.host if request.client else "anonymous"
+    return f"ip:{client_host}"
+
+
+async def rate_limit(request: Request) -> None:
+    """Enforce the per-client request budget."""
+
     limiter = _get_limiter()
-    identity = request.headers.get("authorization") or (
-        request.client.host if request.client else "anonymous"
-    )
-    decision = await limiter.check(identity)
+    decision = await limiter.check(_rate_limit_identity(request))
     if not decision.allowed:
         raise RateLimitError(
             f"Rate limit exceeded; retry in {decision.retry_after:.1f}s",
+            retry_after=decision.retry_after,
         )
 
 

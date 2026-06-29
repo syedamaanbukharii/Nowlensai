@@ -88,6 +88,9 @@ def test_nested_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_is_production_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NOWLENS_ENVIRONMENT", "production")
+    # Production refuses to boot without a strong JWT secret (see the security
+    # guard in Settings); supply one so this exercises only the flag.
+    monkeypatch.setenv("NOWLENS_SECURITY__JWT_SECRET", "s" * 40)
     assert Settings().is_production is True
 
 

@@ -98,3 +98,46 @@ class ObservabilityMiddleware:
 
 def trace_id_of(response: Response) -> str | None:
     return response.headers.get(TRACE_HEADER)
+
+
+# Static, response-independent hardening headers. CSP is intentionally omitted:
+# this process serves JSON plus the Swagger/ReDoc UIs (which need inline scripts
+# and a CDN), and the HTML-serving surface is the frontend, where CSP belongs.
+_BASE_SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"DENY"),
+    (b"referrer-policy", b"no-referrer"),
+    (b"permissions-policy", b"geolocation=(), microphone=(), camera=()"),
+)
+# Tell browsers to pin HTTPS for a year (incl. subdomains). Only meaningful over
+# TLS, so it is applied only in production where the app is served behind HTTPS.
+_HSTS_HEADER: tuple[bytes, bytes] = (
+    b"strict-transport-security",
+    b"max-age=31536000; includeSubDomains",
+)
+
+
+class SecurityHeadersMiddleware:
+    """Attach baseline security headers to every HTTP response (pure-ASGI)."""
+
+    def __init__(self, app: ASGIApp, *, enable_hsts: bool = False) -> None:
+        self.app = app
+        self._headers = list(_BASE_SECURITY_HEADERS)
+        if enable_hsts:
+            self._headers.append(_HSTS_HEADER)
+
+    async def __call__(self, scope, receive, send):  # type: ignore[no-untyped-def]
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):  # type: ignore[no-untyped-def]
+            if message["type"] == "http.response.start":
+                headers = message.setdefault("headers", [])
+                existing = {name.lower() for name, _ in headers}
+                for name, value in self._headers:
+                    if name not in existing:
+                        headers.append((name, value))
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
