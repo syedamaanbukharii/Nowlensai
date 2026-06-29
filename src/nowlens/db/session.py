@@ -35,9 +35,17 @@ def get_engine() -> AsyncEngine:
             str(settings.database_url),
             echo=settings.debug,
             pool_pre_ping=True,
+            pool_size=settings.db.pool_size,
+            max_overflow=settings.db.max_overflow,
+            pool_timeout=settings.db.pool_timeout_s,
+            pool_recycle=settings.db.pool_recycle_s,
             future=True,
         )
-        log.info("db.engine_created")
+        log.info(
+            "db.engine_created",
+            pool_size=settings.db.pool_size,
+            max_overflow=settings.db.max_overflow,
+        )
     return _engine
 
 

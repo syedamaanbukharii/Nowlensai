@@ -62,6 +62,14 @@ class RateLimitError(NowLensError):
     status_code = 429
     code = "rate_limited"
 
+    def __init__(
+        self, message: str, *, retry_after: float | None = None, code: str | None = None
+    ) -> None:
+        super().__init__(message, code=code)
+        # Seconds the client should wait before retrying; surfaced as the
+        # RFC 6585 ``Retry-After`` response header by the API exception handler.
+        self.retry_after = retry_after
+
 
 class NotFoundError(NowLensError):
     status_code = 404

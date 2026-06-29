@@ -60,18 +60,56 @@ class Crawler:
                     url=url, status_code=0, html="", error="disallowed by robots.txt"
                 )
             try:
-                resp = await self._client.get(url)
-                await asyncio.sleep(self._cfg.crawl_delay_s)
-                content_type = resp.headers.get("content-type", "text/html").split(";")[0]
-                return CrawlResult(
-                    url=str(resp.url),
-                    status_code=resp.status_code,
-                    html=resp.text if "html" in content_type or "xml" in content_type else "",
-                    content_type=content_type,
-                )
+                return await self._fetch_capped(url)
             except httpx.HTTPError as exc:
                 log.warning("crawl.error", url=url, error=str(exc))
                 return CrawlResult(url=url, status_code=0, html="", error=str(exc))
+
+    async def _fetch_capped(self, url: str) -> CrawlResult:
+        """Fetch a URL, reading at most ``max_document_bytes`` of the body.
+
+        We stream rather than buffer so an oversized (or maliciously large)
+        response is rejected as soon as it crosses the limit, instead of being
+        fully read into memory first.
+        """
+
+        max_bytes = self._cfg.max_document_bytes
+        async with self._client.stream("GET", url) as resp:
+            content_type = resp.headers.get("content-type", "text/html").split(";")[0]
+            is_textual = "html" in content_type or "xml" in content_type
+
+            declared = resp.headers.get("content-length")
+            if declared is not None and declared.isdigit() and int(declared) > max_bytes:
+                return CrawlResult(
+                    url=str(resp.url),
+                    status_code=resp.status_code,
+                    html="",
+                    content_type=content_type,
+                    error=f"response exceeds {max_bytes} byte limit",
+                )
+
+            body = bytearray()
+            async for chunk in resp.aiter_bytes():
+                body.extend(chunk)
+                if len(body) > max_bytes:
+                    return CrawlResult(
+                        url=str(resp.url),
+                        status_code=resp.status_code,
+                        html="",
+                        content_type=content_type,
+                        error=f"response exceeds {max_bytes} byte limit",
+                    )
+
+            await asyncio.sleep(self._cfg.crawl_delay_s)
+            html = ""
+            if is_textual:
+                html = bytes(body).decode(resp.encoding or "utf-8", errors="replace")
+            return CrawlResult(
+                url=str(resp.url),
+                status_code=resp.status_code,
+                html=html,
+                content_type=content_type,
+            )
 
     async def aclose(self) -> None:
         await self._client.aclose()

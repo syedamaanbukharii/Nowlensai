@@ -30,32 +30,38 @@ def _stage_dict(stage: StageOutcome) -> dict[str, object]:
     return {"name": stage.name, "ok": stage.ok, "detail": stage.detail, "items": stage.items}
 
 
-def _status_for(report: IngestionReport) -> JobStatus:
+def status_for_report(report: IngestionReport) -> JobStatus:
+    """Map an ingestion report to the persisted job status.
+
+    Shared by the background worker and the inline ``/ingest`` path so both
+    record the same terminal status for the same outcome.
+    """
+
     if report.skipped:
         return JobStatus.SKIPPED
     return JobStatus.SUCCEEDED if report.success else JobStatus.FAILED
 
 
-async def run_ingestion_job(job_id: str, url: str) -> IngestionReport:
+async def run_ingestion_job(job_id: str, url: str, tenant_id: str) -> IngestionReport:
     """Run the ingestion pipeline for ``url`` and persist the job outcome."""
 
     async with session_scope() as session:
-        jobs = IngestionJobRepository(session)
+        jobs = IngestionJobRepository(session, tenant_id)
         await jobs.mark(job_id, status=JobStatus.RUNNING)
 
     # Fresh session for the actual work so the RUNNING marker is committed first
     # (gives the admin UI immediate feedback while a long crawl proceeds).
     async with session_scope() as session:
-        pipeline = build_ingestion_pipeline(session)
+        pipeline = build_ingestion_pipeline(session, tenant_id)
         try:
             report = await pipeline.ingest_url(url)
         finally:
             await pipeline.aclose()
 
-        jobs = IngestionJobRepository(session)
+        jobs = IngestionJobRepository(session, tenant_id)
         await jobs.mark(
             job_id,
-            status=_status_for(report),
+            status=status_for_report(report),
             detail=report.error or ("skipped (unchanged)" if report.skipped else "ok"),
             chunks_indexed=report.chunks_indexed,
             duplicates_removed=report.duplicates_removed,

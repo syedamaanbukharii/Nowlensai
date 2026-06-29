@@ -24,6 +24,18 @@ See [`.env.example`](../.env.example) for a ready-to-copy template.
 | `NOWLENS_QDRANT_URL` | str | `http://localhost:6333` | Qdrant endpoint |
 | `NOWLENS_QDRANT_API_KEY` | str? | — | Qdrant API key (if secured) |
 
+## Database pool (`NOWLENS_DB__…`)
+
+Connection-pool tuning for the async SQLAlchemy engine. The DSN itself stays at
+`NOWLENS_DATABASE_URL` (above).
+
+| Variable | Type | Default | Notes |
+|---|---|---|---|
+| `POOL_SIZE` | int | `10` | Persistent connections per process |
+| `MAX_OVERFLOW` | int | `20` | Extra connections opened under load |
+| `POOL_TIMEOUT_S` | float | `30.0` | Wait for a free connection before erroring |
+| `POOL_RECYCLE_S` | int | `1800` | Recycle connections older than this (avoids stale server-side closes) |
+
 ## LLM (`NOWLENS_LLM__…`)
 
 | Variable | Type | Default | Notes |
@@ -70,12 +82,13 @@ See [`.env.example`](../.env.example) for a ready-to-copy template.
 | `SIMHASH_MAX_DISTANCE` | int | `3` | Near-duplicate threshold |
 | `RENDER_JAVASCRIPT` | bool | `false` | Requires the `render` extra + browser |
 | `AI_CLEANING` | bool | `true` | LLM-assisted cleaning (degrades to rules) |
+| `MAX_DOCUMENT_BYTES` | int | `5000000` | Hard cap on a fetched response body; oversized responses are rejected |
 
 ## Security (`NOWLENS_SECURITY__…`)
 
 | Variable | Type | Default | Notes |
 |---|---|---|---|
-| `JWT_SECRET` | str | _placeholder_ | **Set a strong value in production** |
+| `JWT_SECRET` | str | _placeholder_ | **Required in production**: the app refuses to start if this is the built-in placeholder or shorter than 32 chars when `NOWLENS_ENVIRONMENT=production` |
 | `JWT_ALGORITHM` | str | `HS256` | |
 | `ACCESS_TOKEN_TTL_MIN` | int | `30` | Access token lifetime (minutes) |
 | `REFRESH_TOKEN_TTL_DAYS` | int | `14` | Refresh token lifetime (days) |

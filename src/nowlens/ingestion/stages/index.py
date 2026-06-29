@@ -27,7 +27,7 @@ class ChunkSink(Protocol):
     async def upsert_chunks(self, embedded: list[EmbeddedChunk]) -> int: ...
 
 
-def _to_point(embedded: EmbeddedChunk) -> dict:
+def _to_point(embedded: EmbeddedChunk, tenant_id: str) -> dict:
     chunk = embedded.chunk
     md = chunk.metadata
     return {
@@ -35,6 +35,7 @@ def _to_point(embedded: EmbeddedChunk) -> dict:
         "vector": embedded.embedding,
         "payload": {
             "chunk_id": chunk.chunk_id,
+            "tenant_id": tenant_id,
             "document_id": chunk.document_id,
             "text": chunk.text,
             "title": md.get("title", ""),
@@ -52,11 +53,12 @@ async def index_chunks(
     embedded: list[EmbeddedChunk],
     vector_store: QdrantVectorStore,
     *,
+    tenant_id: str,
     sink: ChunkSink | None = None,
 ) -> int:
     if not embedded:
         return 0
-    points = [_to_point(e) for e in embedded]
+    points = [_to_point(e, tenant_id) for e in embedded]
     written = await vector_store.upsert(points)
     if sink is not None:
         await sink.upsert_chunks(embedded)

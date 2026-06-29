@@ -160,5 +160,27 @@ async def test_run_answer_degraded_without_retriever(fake_chat) -> None:
     assert result["grounded"] is False
 
 
+async def test_run_answer_concurrent_contexts_isolated() -> None:
+    """The cached graph is shared, so concurrent runs must not leak context.
+
+    Each call supplies its own chat provider; the per-request context lives in
+    a ContextVar, so two interleaved runs must return their own provider's text.
+    """
+
+    import asyncio
+
+    from tests.conftest import FakeChatProvider
+
+    ctx_a = AgentContext(chat=FakeChatProvider(text="ANSWER-A [1]"), retriever=None)
+    ctx_b = AgentContext(chat=FakeChatProvider(text="ANSWER-B [1]"), retriever=None)
+
+    result_a, result_b = await asyncio.gather(
+        run_answer(ctx_a, "how do I configure assignment rules"),
+        run_answer(ctx_b, "how do I configure assignment rules"),
+    )
+    assert "ANSWER-A" in result_a["answer"]
+    assert "ANSWER-B" in result_b["answer"]
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-v"]))

@@ -84,6 +84,77 @@ def test_short_password_rejected(db_client) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# tenant administration (platform-admin surface)
+# --------------------------------------------------------------------------- #
+
+
+def test_platform_admin_creates_tenant_and_user(db_client) -> None:
+    # First account is the default-tenant admin == platform admin.
+    token = _register(db_client, email="platform@example.com")
+    headers = _auth(token)
+
+    created = db_client.post(
+        "/api/v1/tenants", headers=headers, json={"slug": "acme", "name": "Acme"}
+    )
+    assert created.status_code == 201, created.text
+    tenant_id = created.json()["id"]
+    assert created.json()["slug"] == "acme"
+
+    listed = db_client.get("/api/v1/tenants", headers=headers)
+    slugs = {t["slug"] for t in listed.json()}
+    assert {"default", "acme"} <= slugs
+
+    # Provision the new tenant's admin, then confirm they can authenticate.
+    provisioned = db_client.post(
+        f"/api/v1/tenants/{tenant_id}/users",
+        headers=headers,
+        json={"email": "owner@acme.com", "password": "password123", "role": "admin"},
+    )
+    assert provisioned.status_code == 201, provisioned.text
+    assert provisioned.json()["role"] == "admin"
+
+    login = db_client.post(
+        "/api/v1/auth/login", json={"email": "owner@acme.com", "password": "password123"}
+    )
+    assert login.status_code == 200
+
+
+def test_duplicate_tenant_slug_rejected(db_client) -> None:
+    headers = _auth(_register(db_client, email="p@example.com"))
+    assert (
+        db_client.post("/api/v1/tenants", headers=headers, json={"slug": "acme"}).status_code == 201
+    )
+    dup = db_client.post("/api/v1/tenants", headers=headers, json={"slug": "acme"})
+    assert dup.status_code == 422
+
+
+def test_non_admin_cannot_manage_tenants(db_client) -> None:
+    _register(db_client, email="admin@example.com")  # first == platform admin
+    user_token = _register(db_client, email="member@example.com")  # second == role user
+    resp = db_client.post("/api/v1/tenants", headers=_auth(user_token), json={"slug": "nope"})
+    assert resp.status_code == 403
+    assert resp.json()["code"] == "authorization_error"
+
+
+def test_tenant_admin_cannot_manage_platform(db_client) -> None:
+    platform = _auth(_register(db_client, email="platform@example.com"))
+    tenant_id = db_client.post("/api/v1/tenants", headers=platform, json={"slug": "acme"}).json()[
+        "id"
+    ]
+    db_client.post(
+        f"/api/v1/tenants/{tenant_id}/users",
+        headers=platform,
+        json={"email": "owner@acme.com", "password": "password123", "role": "admin"},
+    )
+    acme_token = db_client.post(
+        "/api/v1/auth/login", json={"email": "owner@acme.com", "password": "password123"}
+    ).json()["access_token"]
+    # A tenant admin is not a platform admin: cross-tenant management is denied.
+    resp = db_client.get("/api/v1/tenants", headers=_auth(acme_token))
+    assert resp.status_code == 403
+
+
+# --------------------------------------------------------------------------- #
 # sessions
 # --------------------------------------------------------------------------- #
 

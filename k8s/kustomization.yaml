@@ -1,0 +1,28 @@
+# Cloud-agnostic base. Apply with: kubectl apply -k k8s/
+# Override per environment with a kustomize overlay (image tags, replicas,
+# config, ingress host). The Secret is intentionally NOT listed here — manage it
+# out-of-band (see secret.example.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: nowlens
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - migrate-job.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - hpa.yaml
+  - ingress.yaml
+
+# Pin/replace images here (or in an overlay) so manifests stay registry-agnostic:
+images:
+  - name: nowlens-api
+    newName: nowlens-api
+    newTag: latest
+  - name: nowlens-frontend
+    newName: nowlens-frontend
+    newTag: latest

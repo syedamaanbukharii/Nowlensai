@@ -1,0 +1,32 @@
+# Non-secret configuration. Secrets (JWT secret, DB URL with credentials, API
+# keys) live in the Secret — never here. Values point at backing services by
+# their in-cluster DNS names; override per environment via kustomize or by
+# editing this ConfigMap. These are deliberately cloud-agnostic: only the
+# service endpoints differ between AWS / Azure / GCP, not the application.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nowlens-config
+  namespace: nowlens
+data:
+  NOWLENS_ENVIRONMENT: "production"
+  NOWLENS_DEBUG: "false"
+  # Comma-separated allowed CORS origins — set to your real frontend origin(s).
+  NOWLENS_CORS_ORIGINS: "https://nowlens.example.com"
+  # Backing services. In-cluster examples shown; point at managed services
+  # (RDS / Cloud SQL / Azure Database, Elasticache / Memorystore, managed
+  # Qdrant) by changing only these values.
+  NOWLENS_REDIS_URL: "redis://redis:6379/0"
+  NOWLENS_QDRANT_URL: "http://qdrant:6333"
+  # LLM / embeddings.
+  NOWLENS_LLM__PROVIDER: "ollama"
+  NOWLENS_LLM__OLLAMA_BASE_URL: "http://ollama:11434"
+  NOWLENS_LLM__EMBEDDING_DIM: "768"
+  # Retrieval.
+  NOWLENS_RAG__COLLECTION: "nowlens_docs"
+  # Observability.
+  NOWLENS_OBS__LOG_LEVEL: "INFO"
+  NOWLENS_OBS__LOG_JSON: "true"
+  # Database pool sizing (per replica).
+  NOWLENS_DB__POOL_SIZE: "10"
+  NOWLENS_DB__MAX_OVERFLOW: "20"

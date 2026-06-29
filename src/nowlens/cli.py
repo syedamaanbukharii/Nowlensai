@@ -84,12 +84,16 @@ def _cmd_bootstrap(_: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------
 async def _init_db() -> dict[str, Any]:
     from nowlens.db.base import Base
-    from nowlens.db.session import dispose_engine, get_engine
+    from nowlens.db.repositories import TenantRepository
+    from nowlens.db.session import dispose_engine, get_engine, session_scope
 
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     tables = sorted(Base.metadata.tables)
+    # Seed the default tenant so registrations have a valid tenant FK target.
+    async with session_scope() as session:
+        await TenantRepository(session).ensure_default()
     await dispose_engine()
     return {"created": True, "tables": tables}
 
@@ -115,12 +119,13 @@ def _collect_urls(args: argparse.Namespace) -> list[str]:
 
 
 async def _ingest(urls: list[str]) -> list[dict[str, Any]]:
+    from nowlens.db.models import DEFAULT_TENANT_ID
     from nowlens.db.session import session_scope
     from nowlens.services import build_ingestion_pipeline
 
     reports: list[dict[str, Any]] = []
     async with session_scope() as session:
-        pipeline = build_ingestion_pipeline(session)
+        pipeline = build_ingestion_pipeline(session, DEFAULT_TENANT_ID)
         try:
             for url in urls:
                 report = await pipeline.ingest_url(url)
@@ -160,11 +165,12 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------
 async def _ask(query: str, *, domains: list[str], top_k: int | None) -> dict[str, Any]:
     from nowlens.agents.graph import run_answer
+    from nowlens.db.models import DEFAULT_TENANT_ID
     from nowlens.db.session import session_scope
     from nowlens.services import build_agent_context
 
     async with session_scope() as session:
-        ctx = build_agent_context(session)
+        ctx = build_agent_context(session, DEFAULT_TENANT_ID)
         return await run_answer(ctx, query, requested_domains=domains or None, final_top_k=top_k)
 
 

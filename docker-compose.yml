@@ -63,7 +63,8 @@ services:
     restart: unless-stopped
 
   qdrant:
-    image: qdrant/qdrant:latest
+    # Pinned for reproducible builds; bump deliberately after testing client compatibility.
+    image: qdrant/qdrant:v1.12.4
     volumes:
       - qdrantdata:/qdrant/storage
     ports:
@@ -104,8 +105,9 @@ services:
     depends_on:
       - prometheus
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      # Overridable via env; defaults are for local development only.
+      GF_SECURITY_ADMIN_USER: ${NOWLENS_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${NOWLENS_GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafanadata:/var/lib/grafana

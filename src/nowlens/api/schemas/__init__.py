@@ -36,6 +36,7 @@ from nowlens.api.schemas.ingestion import (
     ReadinessComponent,
     ReadinessResponse,
 )
+from nowlens.api.schemas.tenant import TenantCreate, TenantOut, TenantUserCreate
 
 __all__ = [
     "AuditOut",
@@ -62,6 +63,9 @@ __all__ = [
     "SearchRequest",
     "SearchResponse",
     "SessionOut",
+    "TenantCreate",
+    "TenantOut",
+    "TenantUserCreate",
     "TokenResponse",
     "UserOut",
 ]

@@ -1,0 +1,41 @@
+# One-shot schema migration + Qdrant collection bootstrap. Run before/with each
+# rollout (it is idempotent: alembic skips applied revisions and bootstrap only
+# creates the collection if missing). With Helm/Argo this would be a pre-sync
+# hook; with plain kubectl, apply it and wait for completion before the rollout.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nowlens-migrate
+  namespace: nowlens
+  labels:
+    app.kubernetes.io/name: nowlens
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nowlens
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: migrate
+          image: nowlens-api:latest
+          command: ["sh", "-c", "alembic upgrade head && nowlens bootstrap"]
+          envFrom:
+            - configMapRef:
+                name: nowlens-config
+            - secretRef:
+                name: nowlens-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

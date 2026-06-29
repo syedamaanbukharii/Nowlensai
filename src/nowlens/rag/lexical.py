@@ -33,7 +33,12 @@ def tokenize(text: str) -> list[str]:
 @runtime_checkable
 class LexicalRetriever(Protocol):
     async def search(
-        self, query: str, *, top_k: int, domains: Sequence[str] | None = None
+        self,
+        query: str,
+        *,
+        top_k: int,
+        domains: Sequence[str] | None = None,
+        tenant_id: str | None = None,
     ) -> list[RetrievedChunk]: ...
 
 
@@ -47,8 +52,15 @@ class BM25Retriever:
         self._bm25 = BM25Okapi(self._tokenized) if self._tokenized else None
 
     async def search(
-        self, query: str, *, top_k: int, domains: Sequence[str] | None = None
+        self,
+        query: str,
+        *,
+        top_k: int,
+        domains: Sequence[str] | None = None,
+        tenant_id: str | None = None,
     ) -> list[RetrievedChunk]:
+        # In-memory BM25 is built per-corpus (already tenant-scoped by the
+        # caller), so ``tenant_id`` is accepted for protocol parity but unused.
         if self._bm25 is None:
             return []
         scores = self._bm25.get_scores(tokenize(query))
@@ -78,7 +90,12 @@ class PostgresFTSRetriever:
         self._session = session
 
     async def search(
-        self, query: str, *, top_k: int, domains: Sequence[str] | None = None
+        self,
+        query: str,
+        *,
+        top_k: int,
+        domains: Sequence[str] | None = None,
+        tenant_id: str | None = None,
     ) -> list[RetrievedChunk]:
         # websearch_to_tsquery safely parses arbitrary user input.
         stmt = sql_text("""
@@ -86,6 +103,7 @@ class PostgresFTSRetriever:
                    ts_rank(tsv, websearch_to_tsquery('english', :q)) AS rank
             FROM document_chunks
             WHERE tsv @@ websearch_to_tsquery('english', :q)
+              AND (:no_tenant OR tenant_id = :tenant_id)
               AND (:no_domains OR domains && :domains)
             ORDER BY rank DESC
             LIMIT :top_k
@@ -93,6 +111,8 @@ class PostgresFTSRetriever:
         params = {
             "q": query,
             "top_k": top_k,
+            "no_tenant": tenant_id is None,
+            "tenant_id": tenant_id or "",
             "no_domains": domains is None or len(domains) == 0,
             "domains": list(domains) if domains else [],
         }

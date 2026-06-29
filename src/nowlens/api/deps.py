@@ -18,7 +18,8 @@ in-process state, and the dependency reflects that without failing requests.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import suppress
 from functools import lru_cache
 from typing import Annotated
 
@@ -28,9 +29,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nowlens.agents.base import AgentContext
 from nowlens.core.config import Settings, get_settings
-from nowlens.core.exceptions import AuthenticationError, RateLimitError
+from nowlens.core.exceptions import AuthenticationError, AuthorizationError, RateLimitError
 from nowlens.core.logging import get_logger
-from nowlens.db.models import Role, User
+from nowlens.db.models import DEFAULT_TENANT_ID, Role, User
 from nowlens.db.repositories import UserRepository
 from nowlens.db.session import get_session
 from nowlens.ingestion.pipeline import IngestionPipeline
@@ -79,20 +80,52 @@ def _get_limiter() -> RateLimiter:
     return RateLimiter.from_settings(get_settings().security, redis=_get_redis())
 
 
-async def rate_limit(request: Request) -> None:
-    """Enforce the per-client request budget.
+async def close_redis() -> None:
+    """Close the shared Redis client and clear the limiter caches (on shutdown).
 
-    Identity is the authenticated subject when present, else the client IP.
+    The client and limiter are process-cached singletons; releasing the
+    connection pool here keeps graceful restarts from leaking connections.
     """
 
+    if _get_redis.cache_info().currsize:
+        client = _get_redis()
+        if client is not None:
+            with suppress(Exception):
+                await client.aclose()
+    _get_redis.cache_clear()
+    _get_limiter.cache_clear()
+
+
+def _rate_limit_identity(request: Request) -> str:
+    """Stable rate-limit identity: the token subject, else the client IP.
+
+    Keying on the raw ``Authorization`` header is wrong because the token
+    rotates on every refresh, which would reset a user's budget. We decode the
+    bearer access token (best effort) and key on its subject so the limit
+    follows the user across token refreshes; unauthenticated/invalid requests
+    fall back to the client IP.
+    """
+
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+        try:
+            return f"user:{decode_token(token, expected_type=ACCESS).subject}"
+        except AuthenticationError:
+            pass
+    client_host = request.client.host if request.client else "anonymous"
+    return f"ip:{client_host}"
+
+
+async def rate_limit(request: Request) -> None:
+    """Enforce the per-client request budget."""
+
     limiter = _get_limiter()
-    identity = request.headers.get("authorization") or (
-        request.client.host if request.client else "anonymous"
-    )
-    decision = await limiter.check(identity)
+    decision = await limiter.check(_rate_limit_identity(request))
     if not decision.allowed:
         raise RateLimitError(
             f"Rate limit exceeded; retry in {decision.retry_after:.1f}s",
+            retry_after=decision.retry_after,
         )
 
 
@@ -117,7 +150,20 @@ async def current_user(
 CurrentUser = Annotated[User, Depends(current_user)]
 
 
-def require_role(minimum: Role):  # type: ignore[no-untyped-def]
+async def current_tenant_id(user: CurrentUser) -> str:
+    """Resolve the active tenant from the authenticated user.
+
+    Tenant membership lives on the user record, so it travels with the
+    authenticated identity without any extra token claims or headers.
+    """
+
+    return user.tenant_id
+
+
+CurrentTenantId = Annotated[str, Depends(current_tenant_id)]
+
+
+def require_role(minimum: Role) -> Callable[[User], Awaitable[User]]:
     """Return a dependency enforcing ``minimum`` role on the current user."""
 
     async def _dependency(user: CurrentUser) -> User:
@@ -131,16 +177,35 @@ RequireOperator = Annotated[User, Depends(require_role(Role.OPERATOR))]
 RequireAdmin = Annotated[User, Depends(require_role(Role.ADMIN))]
 
 
-async def get_retriever(session: SessionDep) -> HybridRetriever:
-    return build_retriever(session)
+async def platform_admin(user: CurrentUser) -> User:
+    """Authorise platform-level (cross-tenant) administration.
+
+    Restricted to admins of the seed/default tenant, which acts as the platform
+    operator workspace. A tenant's own admin manages only their tenant's data
+    and cannot create or enumerate other tenants.
+    """
+
+    ensure_role(user.role, Role.ADMIN)
+    if user.tenant_id != DEFAULT_TENANT_ID:
+        raise AuthorizationError("Platform administration is restricted to the default tenant")
+    return user
 
 
-async def get_agent_context(session: SessionDep) -> AgentContext:
-    return build_agent_context(session)
+PlatformAdmin = Annotated[User, Depends(platform_admin)]
 
 
-async def get_ingestion_pipeline(session: SessionDep) -> AsyncIterator[IngestionPipeline]:
-    pipeline = build_ingestion_pipeline(session)
+async def get_retriever(session: SessionDep, tenant_id: CurrentTenantId) -> HybridRetriever:
+    return build_retriever(session, tenant_id)
+
+
+async def get_agent_context(session: SessionDep, tenant_id: CurrentTenantId) -> AgentContext:
+    return build_agent_context(session, tenant_id)
+
+
+async def get_ingestion_pipeline(
+    session: SessionDep, tenant_id: CurrentTenantId
+) -> AsyncIterator[IngestionPipeline]:
+    pipeline = build_ingestion_pipeline(session, tenant_id)
     try:
         yield pipeline
     finally:

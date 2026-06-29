@@ -34,6 +34,36 @@ def test_trace_id_header_present(client) -> None:
     assert resp.headers.get("x-trace-id")
 
 
+def test_security_headers_present(client) -> None:
+    resp = client.get("/health/live")
+    assert resp.headers.get("x-content-type-options") == "nosniff"
+    assert resp.headers.get("x-frame-options") == "DENY"
+    assert resp.headers.get("referrer-policy") == "no-referrer"
+    # HSTS is production-only; the test app runs in development.
+    assert "strict-transport-security" not in resp.headers
+
+
+def test_retry_after_header_on_rate_limit() -> None:
+    # A route that raises RateLimitError should yield a 429 with a Retry-After
+    # header (RFC 6585), rounded up from the limiter's retry hint.
+    from fastapi.testclient import TestClient
+
+    from nowlens.api.app import create_app
+    from nowlens.core.exceptions import RateLimitError
+
+    app = create_app()
+
+    @app.get("/_ratelimit_probe")
+    async def _probe() -> None:
+        raise RateLimitError("slow down", retry_after=4.2)
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        resp = c.get("/_ratelimit_probe")
+    assert resp.status_code == 429
+    assert resp.headers.get("retry-after") == "5"  # ceil(4.2)
+    assert resp.json()["code"] == "rate_limited"
+
+
 def test_metrics_endpoint(client) -> None:
     # Exercise something first so a counter exists.
     client.get("/health/live")

@@ -8,7 +8,7 @@ This document describes NowLens's security model and the controls in `nowlens.se
 - **Token validation** (`security.jwt.decode_token`) checks the signature, expiry, expected token type, and presence of a subject, raising `AuthenticationError` (→ 401) on any failure.
 - **First-user bootstrap.** The first registered account becomes `admin` so a fresh deployment has an operator; subsequent accounts default to `user`.
 
-> **Production:** set a strong `NOWLENS_SECURITY__JWT_SECRET`. The default is intentionally an obvious placeholder.
+> **Production:** set a strong `NOWLENS_SECURITY__JWT_SECRET`. When `NOWLENS_ENVIRONMENT=production`, the application **refuses to start** if the secret is the built-in placeholder or shorter than 32 characters — a forgeable signing key is a fail-closed condition, not a warning.
 
 ## Passwords
 
@@ -22,11 +22,23 @@ Roles are ranked `viewer (0) < user (1) < operator (2) < admin (3)` (`security.r
 
 - **user** — chat, search, sessions, domains.
 - **operator** — ingestion submission, document/job listing, the config snapshot.
-- **admin** — document deletion (and is the default for the first user).
+- **admin** — document deletion (and is the default for the first user in a tenant).
+
+## Multi-tenancy & data isolation
+
+Every tenant-scoped table (`users`, `chat_sessions`, `messages`, `documents`, `document_chunks`, `ingestion_jobs`, `audit_logs`) carries a non-null `tenant_id`. Isolation is enforced in depth:
+
+- **Repositories** are constructed with a `tenant_id` and filter every read and write by it (`db.repositories`). A repository for tenant A cannot read, update, or delete tenant B's rows — covered by `tests/test_tenancy.py`.
+- **Retrieval** is tenant-bound: Qdrant searches filter on an indexed `tenant_id` payload field, and the Postgres full-text query adds a tenant predicate, so a tenant only ever retrieves its own indexed documentation.
+- **Tenant resolution** comes from the authenticated user's record (`deps.current_tenant_id`), so it travels with the verified identity — there is no client-supplied tenant header to spoof. The JWT format is unchanged.
+- **Email is globally unique**, so login-by-email is unambiguous and the tenant is derived from the resolved user.
+- **Platform vs tenant admin.** Tenant creation and cross-tenant user provisioning (`/api/v1/tenants`) are restricted to **platform admins** — admins of the seed `default` tenant (`deps.platform_admin`). A tenant's own admin manages only their tenant's data through the regular, already-scoped endpoints.
 
 ## Rate limiting
 
 A sliding-window limiter (`security.rate_limit`) keyed by identity (authenticated subject, else client IP) allows `rate_limit_per_minute` requests per 60s plus a one-off `burst`. It uses a Redis sorted set when a client is available (so limits hold across processes) and falls back to a deterministic in-process window otherwise. Redis failures are logged and fall back to local state rather than failing open silently.
+
+Identity is the **decoded token subject** when a valid bearer access token is present, else the client IP — so the budget follows a user across token refreshes rather than resetting each time. Rate-limited responses carry an RFC 6585 `Retry-After` header so clients can back off.
 
 ## Input handling and prompt injection
 
@@ -43,7 +55,9 @@ Security-relevant actions (register, login, chat answers, etc.) are recorded via
 ## Transport and data
 
 - The API emits an `X-Trace-Id` per request for correlation; logs are structured (JSON in production).
-- CORS origins are configurable (`NOWLENS_CORS_ORIGINS`); credentials are allowed only for the configured origins.
+- **Security headers** are attached to every response by `SecurityHeadersMiddleware`: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and a restrictive `Permissions-Policy`. `Strict-Transport-Security` is added in production. Content-Security-Policy is intentionally left to the HTML-serving frontend (the API serves JSON plus the Swagger/ReDoc UIs).
+- CORS is locked down to explicit methods (`GET, POST, DELETE, OPTIONS`) and headers (`Authorization, Content-Type, X-Trace-Id`) for the configured origins — no wildcards. Credentials are allowed only for those origins.
+- The crawler caps each fetched response body at `NOWLENS_INGEST__MAX_DOCUMENT_BYTES` (default 5 MB), streaming and rejecting oversized responses instead of buffering them.
 - Secrets are never serialised by the `/config` endpoint.
 - The runtime container runs as a non-root user.
 

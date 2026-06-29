@@ -1,0 +1,64 @@
+# Routes the public host to the frontend, and the API surface (versioned API,
+# health probes, metrics, docs) to the API Service. `ingressClassName` and TLS
+# are environment-specific: set the class to your controller (nginx, traefik,
+# alb, gce, ...) and wire TLS via cert-manager or your cloud's certificate.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nowlens
+  namespace: nowlens
+  labels:
+    app.kubernetes.io/name: nowlens
+  # annotations:
+  #   cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  # tls:
+  #   - hosts: ["nowlens.example.com"]
+  #     secretName: nowlens-tls
+  rules:
+    - host: nowlens.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: nowlens-api
+                port:
+                  number: 80
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: nowlens-api
+                port:
+                  number: 80
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: nowlens-api
+                port:
+                  number: 80
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: nowlens-api
+                port:
+                  number: 80
+          - path: /openapi.json
+            pathType: Exact
+            backend:
+              service:
+                name: nowlens-api
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nowlens-frontend
+                port:
+                  number: 80

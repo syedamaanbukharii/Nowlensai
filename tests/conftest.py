@@ -209,6 +209,7 @@ class InMemoryVectorStore:
         *,
         top_k: int,
         domains: Sequence[str] | None = None,
+        tenant_id: str | None = None,
     ) -> list[RetrievedChunk]:
         domain_set = set(domains) if domains else None
         scored: list[tuple[float, dict]] = []
@@ -350,11 +351,12 @@ async def seeded_retriever(
 
 
 def _make_user(role: str = "admin"):  # type: ignore[no-untyped-def]
-    from nowlens.db.models import User
+    from nowlens.db.models import DEFAULT_TENANT_ID, User
 
     return User(
         id="user-test-1",
         email="tester@example.com",
+        tenant_id=DEFAULT_TENANT_ID,
         hashed_password="x",
         role=role,
         is_active=True,
@@ -420,12 +422,25 @@ def db_client(fake_chat: FakeChatProvider) -> Iterator:
         poolclass=StaticPool,
     )
     maker = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
-    table_names = ("users", "chat_sessions", "messages", "audit_logs", "ingestion_jobs")
+    table_names = (
+        "tenants",
+        "users",
+        "chat_sessions",
+        "messages",
+        "audit_logs",
+        "ingestion_jobs",
+    )
     tables = [Base.metadata.tables[name] for name in table_names]
 
     async def _create_tables() -> None:
+        from nowlens.db.repositories import TenantRepository
+
         async with engine.begin() as conn:
             await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
+        # Seed the default tenant so register/login satisfy the tenant FK.
+        async with maker() as session:
+            await TenantRepository(session).ensure_default()
+            await session.commit()
 
     async def _dispose() -> None:
         await engine.dispose()

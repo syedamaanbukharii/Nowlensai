@@ -121,8 +121,8 @@ async def chat(
 
     guard_user_input(payload.message)
 
-    sessions = SessionRepository(session)
-    messages = MessageRepository(session)
+    sessions = SessionRepository(session, user.tenant_id)
+    messages = MessageRepository(session, user.tenant_id)
     session_id = await _resolve_session(sessions, session_id=payload.session_id, user=user)
     await messages.add(session_id=session_id, role="user", content=payload.message)
 
@@ -158,7 +158,7 @@ async def chat(
         action="chat.answer",
         target=session_id,
         detail={"intent": result.get("intent", ""), "grounded": result.get("grounded", False)},
-        repository=AuditRepository(session),
+        repository=AuditRepository(session, user.tenant_id),
     )
 
     return ChatResponse(
@@ -187,8 +187,8 @@ async def _stream_events(
     session: SessionDep,
     user: User,
 ) -> AsyncIterator[dict[str, str]]:
-    messages = MessageRepository(session)
-    sessions = SessionRepository(session)
+    messages = MessageRepository(session, user.tenant_id)
+    sessions = SessionRepository(session, user.tenant_id)
 
     yield _sse("session", {"session_id": session_id})
 
@@ -259,7 +259,7 @@ async def _stream_events(
         action="chat.answer.stream",
         target=session_id,
         detail={"grounded": grounded},
-        repository=AuditRepository(session),
+        repository=AuditRepository(session, user.tenant_id),
     )
     yield _sse("done", {"answer": answer, "grounded": grounded})
 
@@ -286,8 +286,8 @@ async def chat_stream(
     """
 
     guard_user_input(payload.message)
-    sessions = SessionRepository(session)
-    messages = MessageRepository(session)
+    sessions = SessionRepository(session, user.tenant_id)
+    messages = MessageRepository(session, user.tenant_id)
     session_id = await _resolve_session(sessions, session_id=payload.session_id, user=user)
     await messages.add(session_id=session_id, role="user", content=payload.message)
 

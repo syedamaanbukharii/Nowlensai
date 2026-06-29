@@ -186,5 +186,71 @@ def test_scan_retrieved_context_reports_without_raising() -> None:
     assert assessment.flagged  # report-only; caller decides
 
 
+# --------------------------------------------------------------------------- #
+# production configuration guard
+# --------------------------------------------------------------------------- #
+
+
+def test_production_rejects_weak_jwt_secret() -> None:
+    from pydantic import ValidationError as PydanticValidationError
+
+    from nowlens.core.config import Settings
+
+    with pytest.raises(PydanticValidationError):
+        Settings(
+            _env_file=None,
+            environment="production",
+            security={"jwt_secret": "dev-insecure-change-me"},
+        )
+    with pytest.raises(PydanticValidationError):
+        Settings(_env_file=None, environment="production", security={"jwt_secret": "too-short"})
+
+
+def test_production_accepts_strong_jwt_secret() -> None:
+    from nowlens.core.config import Settings
+
+    settings = Settings(_env_file=None, environment="production", security={"jwt_secret": "s" * 40})
+    assert settings.is_production
+
+
+def test_development_allows_default_secret() -> None:
+    from nowlens.core.config import Settings
+
+    settings = Settings(_env_file=None, environment="development")
+    assert not settings.is_production
+
+
+# --------------------------------------------------------------------------- #
+# rate-limit identity (stable across token refresh)
+# --------------------------------------------------------------------------- #
+
+
+def _http_request(headers: dict[str, str], *, client_host: str = "1.2.3.4"):  # type: ignore[no-untyped-def]
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "headers": [(k.encode(), v.encode()) for k, v in headers.items()],
+        "client": (client_host, 0),
+    }
+    return Request(scope)
+
+
+def test_rate_limit_identity_keys_on_token_subject() -> None:
+    from nowlens.api.deps import _rate_limit_identity
+
+    token = create_access_token("user-9", role="user")
+    identity = _rate_limit_identity(_http_request({"authorization": f"Bearer {token}"}))
+    assert identity == "user:user-9"
+
+
+def test_rate_limit_identity_falls_back_to_ip() -> None:
+    from nowlens.api.deps import _rate_limit_identity
+
+    assert _rate_limit_identity(_http_request({})) == "ip:1.2.3.4"
+    # An invalid/garbage token must not crash; it falls back to the IP.
+    assert _rate_limit_identity(_http_request({"authorization": "Bearer nonsense"})) == "ip:1.2.3.4"
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-v"]))
