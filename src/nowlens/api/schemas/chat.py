@@ -34,6 +34,10 @@ class ChatResponse(BaseModel):
 
     session_id: str
     answer: str
+    # Auto-detected platform + user role (empty when inconclusive). Additive;
+    # older clients simply ignore them.
+    platform: str = ""
+    role: str = ""
     intent: str
     domains: list[str]
     citations: list[CitationOut]
