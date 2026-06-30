@@ -19,10 +19,24 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
-from nowlens.core.domains import Domain
-
-# Re-exported so packs depend on the framework, not on ``core`` internals.
 __all__ = ["Domain", "DomainPack", "PlatformSignal"]
+
+
+@dataclass(frozen=True)
+class Domain:
+    """A module / capability area within a platform.
+
+    Canonical home for the type so packs depend on the framework rather than on
+    ``core`` internals; ``nowlens.core.domains`` re-exports it for compatibility.
+    The ``related`` graph encodes commonly-confused or overlapping capabilities.
+    """
+
+    key: str
+    name: str
+    category: str
+    description: str
+    aliases: tuple[str, ...] = ()
+    related: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

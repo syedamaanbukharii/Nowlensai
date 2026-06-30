@@ -148,5 +148,29 @@ def test_packs_settings_parses_csv_enabled() -> None:
     assert settings.default == "servicenow"
 
 
+# --------------------------------------------------------------------------- #
+# bundled ServiceNow pack
+# --------------------------------------------------------------------------- #
+
+
+def test_servicenow_pack_lists_domains_and_detects() -> None:
+    from nowlens.domain_packs.servicenow import ServiceNowPack
+
+    pack = ServiceNowPack()
+    assert pack.key == "servicenow"
+    assert "itsm" in pack.domains()
+    signal = pack.detect("how do I write a GlideRecord query in ServiceNow?")
+    assert signal.platform == "servicenow"
+    assert signal.confidence > 0
+
+
+def test_servicenow_pack_discovered_via_entry_point() -> None:
+    # Registered in pyproject under the nowlens.domain_packs group, so a normal
+    # install (incl. CI's fresh install) discovers it.
+    from nowlens.domain_packs import get_registry
+
+    assert get_registry().get("servicenow") is not None
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-v"]))
