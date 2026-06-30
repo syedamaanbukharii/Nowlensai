@@ -173,6 +173,24 @@ class ObservabilitySettings(BaseSettings):
     langfuse_secret_key: str | None = None
 
 
+class PacksSettings(BaseSettings):
+    """Domain Pack selection (discovery is via entry-points; see domain_packs)."""
+
+    model_config = SettingsConfigDict(env_prefix="NOWLENS_PACKS_", extra="ignore")
+
+    # Allow-list of pack entry-point names to load; empty = load all discovered.
+    enabled: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    # Platform assumed when detection is inconclusive (keeps behaviour stable).
+    default: str = "servicenow"
+
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def _split_enabled(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+
 class Settings(BaseSettings):
     """Root settings object aggregating every configuration group."""
 
@@ -208,6 +226,7 @@ class Settings(BaseSettings):
     ingestion: IngestionSettings = Field(default_factory=IngestionSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    packs: PacksSettings = Field(default_factory=PacksSettings)
 
     @field_validator("cors_origins", mode="before")
     @classmethod
