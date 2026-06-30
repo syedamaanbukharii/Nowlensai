@@ -33,6 +33,11 @@ class AgentState(TypedDict, total=False):
     requested_domains: list[str]
     final_top_k: int | None
 
+    # -- detection (automatic platform/module/role resolution) -------------
+    platform: str
+    role: str
+    detection: dict[str, Any]
+
     # -- routing -----------------------------------------------------------
     intent: str
     domains: list[str]

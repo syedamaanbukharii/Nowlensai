@@ -164,6 +164,8 @@ async def chat(
     return ChatResponse(
         session_id=session_id,
         answer=result.get("answer", ""),
+        platform=result.get("platform", ""),
+        role=result.get("role", ""),
         intent=result.get("intent", ""),
         domains=list(result.get("domains", [])),
         citations=citations,

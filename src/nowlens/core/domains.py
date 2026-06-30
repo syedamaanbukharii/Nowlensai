@@ -11,6 +11,7 @@ imports (``from nowlens.core.domains import Domain``) keep working.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from nowlens.domain_packs.base import Domain
@@ -21,6 +22,7 @@ __all__ = [
     "all_domain_keys",
     "analyze_overlap",
     "detect_domains",
+    "detect_domains_in",
     "get_domain",
 ]
 
@@ -47,16 +49,17 @@ def get_domain(key: str) -> Domain | None:
     return _active_domains().get(key.lower())
 
 
-def detect_domains(text: str, *, limit: int = 5) -> list[str]:
-    """Heuristically detect the most relevant domains for a piece of text.
+def detect_domains_in(text: str, domains: Mapping[str, Domain], *, limit: int = 5) -> list[str]:
+    """Heuristically rank the most relevant domains from a given catalogue.
 
-    Pure lexical scoring over names + aliases of the active catalogue. Cheap,
-    deterministic, and dependency-free; an LLM classifier can refine it.
+    Pure lexical scoring over names + aliases. Cheap, deterministic, and
+    dependency-free; an LLM classifier can refine it. Used both for the active
+    pack and for platform-scoped module detection.
     """
 
     lowered = f" {text.lower()} "
     scores: dict[str, int] = {}
-    for key, domain in _active_domains().items():
+    for key, domain in domains.items():
         score = 0
         needles = (domain.name.lower(), key.replace("_", " "), *domain.aliases)
         for needle in needles:
@@ -72,6 +75,12 @@ def detect_domains(text: str, *, limit: int = 5) -> list[str]:
             scores[key] = score
     ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
     return [key for key, _ in ranked[:limit]]
+
+
+def detect_domains(text: str, *, limit: int = 5) -> list[str]:
+    """Detect domains over the active default pack's catalogue."""
+
+    return detect_domains_in(text, _active_domains(), limit=limit)
 
 
 @dataclass

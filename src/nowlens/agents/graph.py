@@ -4,7 +4,9 @@ LangGraph is the orchestration core. The answering graph is::
 
         START
           │
-        route                 (classify intent + resolve domains)
+        detect                (auto platform / module / role detection)
+          │
+        route                 (classify intent from detected modules)
           │
     knowledge_retrieval        (hybrid RAG → context + citations)
           │
@@ -44,11 +46,11 @@ from nowlens.agents.base import (
     INTENT_MARKETPLACE,
     INTENT_RESEARCH,
     AgentContext,
-    domains_for,
     route_intent,
 )
 from nowlens.agents.best_practices import best_practices
 from nowlens.agents.business_analysis import business_analysis
+from nowlens.agents.detect import detect_module, detect_platform, detect_role
 from nowlens.agents.feature_overlap import feature_overlap
 from nowlens.agents.knowledge import knowledge_retrieval
 from nowlens.agents.marketplace import marketplace_assessment
@@ -70,12 +72,40 @@ _SPECIALISTS: dict[str, NodeFn] = {
 }
 
 
-async def _route(state: AgentState) -> AgentState:
-    """Resolve domains then classify intent (pure, deterministic)."""
+async def _detect(state: AgentState) -> AgentState:
+    """Automatic platform / module / role detection (pure, deterministic).
 
-    domains = domains_for(state["query"], state.get("requested_domains", []))
-    intent = route_intent(state["query"], domains)
-    return AgentState(domains=domains, intent=intent, trace=[f"route:{intent}"])
+    Runs first: resolves the platform via the Domain Pack registry, the modules
+    within that platform, and the user's role — so the rest of the graph routes
+    without the user ever selecting a platform. An explicit ``requested_domains``
+    overrides module detection.
+    """
+
+    query = state["query"]
+    history = state.get("history", [])
+    signal = detect_platform(query, history)
+    requested = state.get("requested_domains", [])
+    modules = list(requested) if requested else detect_module(query, signal.platform)
+    role = detect_role(query, history)
+    return AgentState(
+        platform=signal.platform,
+        domains=modules,
+        role=role,
+        detection={
+            "platform": signal.platform,
+            "platform_confidence": signal.confidence,
+            "platform_matched": signal.matched,
+            "role": role,
+        },
+        trace=[f"platform:{signal.platform or 'unknown'}", f"role:{role or 'unknown'}"],
+    )
+
+
+async def _route(state: AgentState) -> AgentState:
+    """Classify intent from the detected modules (pure, deterministic)."""
+
+    intent = route_intent(state["query"], state.get("domains", []))
+    return AgentState(intent=intent, trace=[f"route:{intent}"])
 
 
 def _select_specialist(state: AgentState) -> str:
@@ -115,13 +145,15 @@ def _assemble(
     # cleanly, so these registrations need a targeted arg-type ignore; the
     # callables are valid nodes at runtime.
     graph = StateGraph(AgentState)
+    graph.add_node("detect", _detect)
     graph.add_node("route", _route)
     graph.add_node("knowledge_retrieval", knowledge)  # type: ignore[arg-type]
     for intent, fn in specialists.items():
         graph.add_node(intent, fn)  # type: ignore[arg-type]
     graph.add_node("quality_assurance", qa)  # type: ignore[arg-type]
 
-    graph.add_edge(START, "route")
+    graph.add_edge(START, "detect")
+    graph.add_edge("detect", "route")
     graph.add_edge("route", "knowledge_retrieval")
     graph.add_conditional_edges(
         "knowledge_retrieval",
@@ -171,6 +203,9 @@ def _result(state: AgentState) -> dict[str, Any]:
 
     return {
         "answer": state.get("answer", ""),
+        "platform": state.get("platform", ""),
+        "role": state.get("role", ""),
+        "detection": state.get("detection", {}),
         "intent": state.get("intent", ""),
         "domains": state.get("domains", []),
         "citations": state.get("citations", []),
