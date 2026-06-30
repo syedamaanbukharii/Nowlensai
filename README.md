@@ -2,7 +2,7 @@
 
 **A multi-agent ServiceNow expert: hybrid RAG retrieval, a LangGraph agent graph, and an automated documentation ingestion pipeline — behind a typed, observable FastAPI.**
 
-NowLens answers ServiceNow questions (best practices, business analysis, feature overlap, marketplace readiness, research) by retrieving from a curated corpus of ingested documentation and reasoning over it with a graph of specialist agents. It is provider-agnostic (Ollama or Groq), stores vectors in Qdrant and metadata in PostgreSQL, and ships with authentication, RBAC, rate limiting, prompt-injection defences, Prometheus metrics, and a Next.js frontend.
+NowLens answers ServiceNow questions (best practices, business analysis, feature overlap, marketplace readiness, research) by retrieving from a curated corpus of ingested documentation and reasoning over it with a graph of specialist agents. It is provider-agnostic (chat via Ollama or Groq; embeddings via Ollama or any OpenAI-compatible service), stores vectors in Qdrant and metadata in PostgreSQL, and ships as a **multi-tenant**, cloud-agnostic SaaS platform: HttpOnly-cookie auth with CSRF, RBAC, tenant data isolation, rate limiting, prompt-injection defences, security headers, Prometheus metrics, a Next.js frontend, and Kubernetes manifests.
 
 ---
 
@@ -31,7 +31,14 @@ ServiceNow is broad: a single question ("should we use CSM or ITSM for this?", "
 - **Specialist agents** — a deterministic router dispatches each question to the right specialist (best practices, business analysis, feature overlap, marketplace assessment, research), and a quality-assurance node checks grounding and citation validity before the answer is returned.
 - **Automated ingestion** — a documented crawl → extract → clean → normalize → chunk → enrich → dedup → embed → validate → index pipeline keeps the corpus fresh, with incremental re-crawls and per-stage reporting.
 
-Everything depends only on provider-agnostic interfaces, so swapping Ollama for Groq (or adding a backend) is a configuration change.
+Everything depends only on provider-agnostic interfaces, so swapping Ollama for Groq, pointing embeddings at a hosted OpenAI-compatible service, or adding a backend is a configuration change.
+
+### Enterprise / production readiness
+
+- **Multi-tenant isolation** — every tenant-scoped table carries a `tenant_id`; repositories and hybrid retrieval (Qdrant payload filter + Postgres FTS predicate) scope all reads and writes to the caller's tenant. Platform admins provision tenants and users via `/api/v1/tenants`. The tenant is resolved from the authenticated user, so the token format is unchanged.
+- **Browser-safe auth** — access/refresh JWTs are issued as **HttpOnly cookies** (XSS-resistant) with double-submit **CSRF** protection, while the bearer-token flow stays fully supported for API clients.
+- **Security by default** — production refuses to boot with a weak JWT secret; responses carry hardening headers; CORS is locked to explicit methods/headers; rate limiting keys on the user; crawled responses are size-capped.
+- **Cloud-agnostic deployment** — multi-stage Docker images, Docker Compose, and Kubernetes manifests (`k8s/`) run unchanged on AWS/Azure/GCP; only backing-service endpoints differ. CI verifies lint, types, tests (Python 3.11 + 3.12), the frontend build, and both Docker images.
 
 ## Architecture
 
@@ -129,12 +136,14 @@ All configuration is environment-driven through a single typed `Settings` object
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `NOWLENS_LLM__PROVIDER` | `ollama` | `ollama` or `groq` |
+| `NOWLENS_LLM__PROVIDER` | `ollama` | Chat backend: `ollama` or `groq` |
+| `NOWLENS_LLM__EMBEDDING_PROVIDER` | `ollama` | Embedding backend: `ollama` or `openai` (OpenAI-compatible) |
 | `NOWLENS_LLM__OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint |
 | `NOWLENS_DATABASE_URL` | `postgresql+asyncpg://nowlens:nowlens@localhost:5432/nowlens` | Postgres DSN |
 | `NOWLENS_QDRANT_URL` | `http://localhost:6333` | Qdrant endpoint |
 | `NOWLENS_REDIS_URL` | `redis://localhost:6379/0` | Redis (rate-limit sharing) |
-| `NOWLENS_SECURITY__JWT_SECRET` | _dev default_ | **set a strong secret in production** |
+| `NOWLENS_SECURITY__JWT_SECRET` | _dev default_ | **set a strong secret in production** (boot fails otherwise) |
+| `NOWLENS_SECURITY__COOKIE_SECURE` | `false` | Mark auth cookies `Secure`; set `true` in production |
 | `NOWLENS_RAG__FINAL_TOP_K` | `6` | Chunks fed to the generator |
 
 ## CLI
@@ -160,9 +169,10 @@ Base path `/api/v1`. Full request/response details in [docs/API.md](docs/API.md)
 | `GET /health/live` | — | Liveness |
 | `GET /health/ready` | — | Readiness (DB, Qdrant, Redis) |
 | `GET /metrics` | — | Prometheus metrics |
-| `POST /api/v1/auth/register` | — | Register (first user → admin) |
-| `POST /api/v1/auth/login` | — | Obtain tokens |
-| `POST /api/v1/auth/refresh` | — | Refresh access token |
+| `POST /api/v1/auth/register` | — | Register (first user per tenant → admin); sets auth cookies |
+| `POST /api/v1/auth/login` | — | Obtain tokens; sets HttpOnly cookies + CSRF |
+| `POST /api/v1/auth/refresh` | — | Refresh (token from cookie or body) |
+| `POST /api/v1/auth/logout` | — | Clear auth cookies |
 | `GET /api/v1/auth/me` | user | Current user |
 | `POST /api/v1/chat` | user | Full agent graph (non-streaming) |
 | `POST /api/v1/chat/stream` | user | Grounded answer over SSE |
@@ -180,8 +190,11 @@ Base path `/api/v1`. Full request/response details in [docs/API.md](docs/API.md)
 | `GET /api/v1/domains/{key}` | user | Domain detail |
 | `POST /api/v1/domains/overlap` | user | Structural overlap analysis |
 | `GET /api/v1/config` | operator | Redacted config snapshot |
+| `POST /api/v1/tenants` | platform&nbsp;admin | Create a tenant |
+| `GET /api/v1/tenants` | platform&nbsp;admin | List tenants |
+| `POST /api/v1/tenants/{id}/users` | platform&nbsp;admin | Provision a user in a tenant |
 
-Errors use a uniform envelope: `{"code": "...", "message": "...", "trace_id": "..."}`.
+Authentication accepts either an `Authorization: Bearer` token (API clients) or the HttpOnly access cookie (browsers); cookie-authenticated writes require the `X-CSRF-Token` header. *Platform admin* = an admin of the seed `default` tenant. Errors use a uniform envelope: `{"code": "...", "message": "...", "trace_id": "..."}`.
 
 ## Testing & quality
 
@@ -191,7 +204,7 @@ make test-cov      # with coverage
 make check         # lint + typecheck + test (the CI gate)
 ```
 
-The suite (129 tests) covers pure logic (fusion, compression, citations, chunking, SimHash dedup, normalization, enrichment, validation, BM25, domains), security (passwords, JWT, sanitisation, RBAC, rate limiting, prompt injection), configuration parsing, the hybrid retriever, the ingestion pipeline end-to-end, the agent graph, and the API via `TestClient`. External systems are replaced with in-memory fakes: a deterministic chat/embedding provider, an in-memory vector store, and an in-memory SQLite database for the persistence-backed endpoints. No network, Qdrant, Postgres, Ollama, or Groq is required to run the tests.
+The suite (157 tests) covers pure logic (fusion, compression, citations, chunking, SimHash dedup, normalization, enrichment, validation, BM25, domains), security (passwords, JWT, sanitisation, RBAC, rate limiting, prompt injection, the production-secret guard, security headers, cookie auth + CSRF), multi-tenant isolation, the OpenAI-compatible embedding provider (via mock transport), configuration parsing, the hybrid retriever, the ingestion pipeline end-to-end, the agent graph (including concurrency isolation), and the API via `TestClient`. External systems are replaced with in-memory fakes: a deterministic chat/embedding provider, an in-memory vector store, and an in-memory SQLite database for the persistence-backed endpoints. No network, Qdrant, Postgres, Ollama, or Groq is required to run the tests.
 
 ## Project layout
 
@@ -202,15 +215,16 @@ src/nowlens/
   rag/           vector store, lexical, fusion, rerank, compression, retriever
   ingestion/     pipeline + stages (crawl…index)
   agents/        LangGraph nodes, prompts, graph wiring
-  db/            SQLAlchemy models, repositories, session, Alembic migrations
+  db/            SQLAlchemy models (multi-tenant), repositories, session, Alembic migrations
   security/      JWT, passwords, RBAC, rate limiting, sanitisation, injection
   observability/ Prometheus metrics, optional Langfuse tracing
-  api/           FastAPI app, deps, middleware, routers, schemas
+  api/           FastAPI app, deps, middleware, cookies, routers, schemas
   workers/       background ingestion task (+ optional arq worker)
   cli.py         command-line interface
 tests/           offline test suite
 docs/            architecture, API, ingestion, security, deployment, config
 frontend/        Next.js (App Router) UI
+k8s/             cloud-agnostic Kubernetes manifests (kubectl apply -k k8s/)
 ```
 
 ## What is verified vs. what needs services
@@ -225,11 +239,11 @@ frontend/        Next.js (App Router) UI
 - [docs/API.md](docs/API.md) — endpoint reference
 - [docs/INGESTION.md](docs/INGESTION.md) — the ingestion pipeline
 - [docs/SECURITY.md](docs/SECURITY.md) — auth, RBAC, hardening
-- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Docker, migrations, scaling, workers
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — Docker, migrations, scaling, workers, Kubernetes
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — every setting
+- [k8s/README.md](k8s/README.md) — Kubernetes manifests (EKS/AKS/GKE)
 - [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [CHANGELOG.md](CHANGELOG.md)
 
 ## License
 
 Apache-2.0 — see [LICENSE](LICENSE).
-# Nowlensai
