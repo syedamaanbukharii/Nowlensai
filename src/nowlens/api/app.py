@@ -135,7 +135,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Explicit allow-lists rather than wildcards: only the verbs and headers
         # the API actually uses, so the cross-origin surface stays minimal.
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Trace-Id"],
+        allow_headers=["Authorization", "Content-Type", "X-Trace-Id", "X-CSRF-Token"],
         expose_headers=["X-Trace-Id", "Retry-After"],
     )
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from nowlens.api.deps import CsrfProtect
 from nowlens.api.routers import (
     auth,
     chat,
@@ -27,8 +28,9 @@ from nowlens.api.routers import (
 health_router = health.router
 metrics_router = metrics.router
 
-# Versioned application surface.
-api_router = APIRouter(prefix="/api/v1")
+# Versioned application surface. The CSRF guard applies to every route here;
+# it is a no-op for bearer-token and safe (GET/HEAD/OPTIONS) requests.
+api_router = APIRouter(prefix="/api/v1", dependencies=[CsrfProtect])
 api_router.include_router(auth.router)
 api_router.include_router(tenants.router)
 api_router.include_router(sessions.router)

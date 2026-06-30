@@ -5,6 +5,7 @@ export interface TokenResponse {
   refresh_token: string;
   token_type: string;
   expires_in: number;
+  csrf_token?: string | null;
 }
 
 export interface UserOut {

@@ -151,6 +151,15 @@ class SecuritySettings(BaseSettings):
     # Maximum accepted size for free-text user input (defence in depth).
     max_input_chars: int = 8000
 
+    # Cookie-based auth: tokens are also issued as HttpOnly cookies so the
+    # browser never exposes them to JavaScript (XSS-resistant). Tune for the
+    # deployment topology: same-site (frontend + API on one domain) works with
+    # SameSite=Lax; a cross-site frontend (e.g. Vercel + separate API host)
+    # needs SameSite=None + Secure + matching CORS.
+    cookie_secure: bool = False  # set true in production (HTTPS); required for SameSite=None
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    cookie_domain: str | None = None  # None => host-only cookie
+
 
 class ObservabilitySettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NOWLENS_OBS_", extra="ignore")
