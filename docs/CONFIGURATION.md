@@ -99,6 +99,9 @@ Connection-pool tuning for the async SQLAlchemy engine. The DSN itself stays at
 | `RATE_LIMIT_PER_MINUTE` | int | `60` | Per-identity request budget |
 | `RATE_LIMIT_BURST` | int | `20` | One-off burst allowance |
 | `MAX_INPUT_CHARS` | int | `8000` | Max free-text input size |
+| `COOKIE_SECURE` | bool | `false` | Mark auth cookies `Secure` (set `true` in production / HTTPS; required for `SameSite=none`) |
+| `COOKIE_SAMESITE` | enum | `lax` | Auth cookie `SameSite`: `lax` (same-site frontend) \| `strict` \| `none` (cross-site frontend) |
+| `COOKIE_DOMAIN` | str? | — | Auth cookie domain; unset = host-only |
 
 ## Observability (`NOWLENS_OBS__…`)
 

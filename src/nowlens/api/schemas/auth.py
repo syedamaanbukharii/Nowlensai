@@ -16,7 +16,9 @@ class LoginRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str = Field(min_length=1)
+    # Optional: browser clients send the refresh token via the HttpOnly cookie
+    # instead of the body. Bearer clients continue to pass it here.
+    refresh_token: str | None = Field(default=None)
 
 
 class TokenResponse(BaseModel):
@@ -24,6 +26,9 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+    # Double-submit CSRF token (also set as a readable cookie). Browser clients
+    # echo it back in the X-CSRF-Token header on cookie-authenticated writes.
+    csrf_token: str | None = None
 
 
 class UserOut(BaseModel):

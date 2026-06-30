@@ -8,8 +8,16 @@ an admin. Passwords are hashed with bcrypt and never stored or logged in clear.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from typing import Annotated
 
+from fastapi import APIRouter, Cookie, Response, status
+
+from nowlens.api.cookies import (
+    REFRESH_COOKIE,
+    clear_auth_cookies,
+    new_csrf_token,
+    set_auth_cookies,
+)
 from nowlens.api.deps import CurrentUser, RateLimitDep, SessionDep
 from nowlens.api.schemas import (
     LoginRequest,
@@ -29,17 +37,37 @@ from nowlens.security.password import hash_password, verify_password
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _token_response(subject: str, role: str) -> TokenResponse:
-    ttl_min = get_settings().security.access_token_ttl_min
+def _issue_tokens(response: Response, subject: str, role: str) -> TokenResponse:
+    """Mint tokens, set them as cookies, and return them in the body.
+
+    The body keeps bearer-token clients working; the cookies give browsers an
+    XSS-resistant (HttpOnly) session plus a CSRF token for the double-submit
+    check on cookie-authenticated requests.
+    """
+
+    security = get_settings().security
+    access = create_access_token(subject, role=role)
+    refresh = create_refresh_token(subject)
+    csrf = new_csrf_token()
+    set_auth_cookies(
+        response,
+        access_token=access,
+        refresh_token=refresh,
+        csrf_token=csrf,
+        security=security,
+    )
     return TokenResponse(
-        access_token=create_access_token(subject, role=role),
-        refresh_token=create_refresh_token(subject),
-        expires_in=ttl_min * 60,
+        access_token=access,
+        refresh_token=refresh,
+        expires_in=security.access_token_ttl_min * 60,
+        csrf_token=csrf,
     )
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(payload: RegisterRequest, session: SessionDep, _: RateLimitDep) -> TokenResponse:
+async def register(
+    payload: RegisterRequest, response: Response, session: SessionDep, _: RateLimitDep
+) -> TokenResponse:
     users = UserRepository(session)
     if await users.get_by_email(payload.email) is not None:
         raise ValidationError("An account with this email already exists")
@@ -61,11 +89,13 @@ async def register(payload: RegisterRequest, session: SessionDep, _: RateLimitDe
         detail={"role": str(role)},
         repository=AuditRepository(session, tenant_id),
     )
-    return _token_response(user.id, str(user.role))
+    return _issue_tokens(response, user.id, str(user.role))
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, session: SessionDep, _: RateLimitDep) -> TokenResponse:
+async def login(
+    payload: LoginRequest, response: Response, session: SessionDep, _: RateLimitDep
+) -> TokenResponse:
     users = UserRepository(session)
     user = await users.get_by_email(payload.email)
     # Verify even when the user is missing-ish to keep timing uniform; a missing
@@ -82,16 +112,34 @@ async def login(payload: LoginRequest, session: SessionDep, _: RateLimitDep) -> 
         target=user.id,
         repository=AuditRepository(session, user.tenant_id),
     )
-    return _token_response(user.id, str(user.role))
+    return _issue_tokens(response, user.id, str(user.role))
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(payload: RefreshRequest, session: SessionDep, _: RateLimitDep) -> TokenResponse:
-    token = decode_token(payload.refresh_token, expected_type=REFRESH)
+async def refresh(
+    payload: RefreshRequest,
+    response: Response,
+    session: SessionDep,
+    _: RateLimitDep,
+    refresh_cookie: Annotated[str | None, Cookie(alias=REFRESH_COOKIE)] = None,
+) -> TokenResponse:
+    # Accept the refresh token from the request body (bearer clients) or the
+    # HttpOnly cookie (browser clients).
+    raw = payload.refresh_token or refresh_cookie
+    if not raw:
+        raise AuthenticationError("Missing refresh token")
+    token = decode_token(raw, expected_type=REFRESH)
     user = await UserRepository(session).get(token.subject)
     if user is None or not user.is_active:
         raise AuthenticationError("User not found or inactive")
-    return _token_response(user.id, str(user.role))
+    return _issue_tokens(response, user.id, str(user.role))
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(response: Response) -> None:
+    """Clear the auth cookies (a no-op for pure bearer-token clients)."""
+
+    clear_auth_cookies(response, security=get_settings().security)
 
 
 @router.get("/me", response_model=UserOut)

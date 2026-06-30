@@ -15,17 +15,16 @@ import type {
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "http://localhost:8000";
 
-const TOKEN_KEY = "nowlens.token";
+const CSRF_COOKIE = "nowlens_csrf";
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(TOKEN_KEY);
-}
-
-export function setToken(token: string | null): void {
-  if (typeof window === "undefined") return;
-  if (token) window.localStorage.setItem(TOKEN_KEY, token);
-  else window.localStorage.removeItem(TOKEN_KEY);
+// Authentication uses HttpOnly cookies set by the API, so the token is never
+// exposed to JavaScript. For cookie-authenticated writes we echo the readable
+// CSRF cookie back in the X-CSRF-Token header (double-submit).
+function getCsrfToken(): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${CSRF_COOKIE}=([^;]+)`));
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 export class ApiError extends Error {
@@ -44,14 +43,14 @@ export class ApiError extends Error {
 
 async function request<T>(
   path: string,
-  options: { method?: string; body?: unknown; auth?: boolean } = {},
+  options: { method?: string; body?: unknown } = {},
 ): Promise<T> {
-  const { method = "GET", body, auth = true } = options;
+  const { method = "GET", body } = options;
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["content-type"] = "application/json";
-  if (auth) {
-    const token = getToken();
-    if (token) headers["authorization"] = `Bearer ${token}`;
+  if (!SAFE_METHODS.has(method.toUpperCase())) {
+    const csrf = getCsrfToken();
+    if (csrf) headers["x-csrf-token"] = csrf;
   }
 
   let res: Response;
@@ -59,6 +58,9 @@ async function request<T>(
     res = await fetch(`${API_BASE}${path}`, {
       method,
       headers,
+      // Send/receive the auth + CSRF cookies (cross-origin needs API CORS
+      // allow-credentials + a non-Lax SameSite, which the backend supports).
+      credentials: "include",
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
@@ -84,15 +86,15 @@ export const api = {
     request<TokenResponse>("/api/v1/auth/register", {
       method: "POST",
       body: { email, password },
-      auth: false,
     }),
 
   login: (email: string, password: string) =>
     request<TokenResponse>("/api/v1/auth/login", {
       method: "POST",
       body: { email, password },
-      auth: false,
     }),
+
+  logout: () => request<void>("/api/v1/auth/logout", { method: "POST" }),
 
   me: () => request<UserOut>("/api/v1/auth/me"),
 

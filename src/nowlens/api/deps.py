@@ -18,16 +18,18 @@ in-process state, and the dependency reflects that without failing requests.
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Cookie, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nowlens.agents.base import AgentContext
+from nowlens.api.cookies import ACCESS_COOKIE, CSRF_COOKIE, CSRF_HEADER
 from nowlens.core.config import Settings, get_settings
 from nowlens.core.exceptions import AuthenticationError, AuthorizationError, RateLimitError
 from nowlens.core.logging import get_logger
@@ -135,12 +137,18 @@ RateLimitDep = Annotated[None, Depends(rate_limit)]
 async def current_user(
     session: SessionDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    access_cookie: Annotated[str | None, Cookie(alias=ACCESS_COOKIE)] = None,
 ) -> User:
-    """Resolve the active user from a bearer access token."""
+    """Resolve the active user from the access token.
 
-    if credentials is None or not credentials.credentials:
-        raise AuthenticationError("Missing bearer token")
-    token = decode_token(credentials.credentials, expected_type=ACCESS)
+    The token is taken from the ``Authorization: Bearer`` header (API clients)
+    or the HttpOnly access cookie (browser clients), header taking precedence.
+    """
+
+    raw = credentials.credentials if credentials and credentials.credentials else access_cookie
+    if not raw:
+        raise AuthenticationError("Missing access token")
+    token = decode_token(raw, expected_type=ACCESS)
     user = await UserRepository(session).get(token.subject)
     if user is None or not user.is_active:
         raise AuthenticationError("User not found or inactive")
@@ -148,6 +156,46 @@ async def current_user(
 
 
 CurrentUser = Annotated[User, Depends(current_user)]
+
+
+# Auth-establishment endpoints: exempt from CSRF because they either run before a
+# CSRF token exists (login/register) or only rotate/clear the caller's own
+# session (refresh/logout).
+_CSRF_EXEMPT = frozenset(
+    {
+        "/api/v1/auth/login",
+        "/api/v1/auth/register",
+        "/api/v1/auth/refresh",
+        "/api/v1/auth/logout",
+    }
+)
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
+
+
+async def csrf_protect(request: Request) -> None:
+    """Double-submit CSRF check for cookie-authenticated unsafe requests.
+
+    Bearer-token requests are exempt — a cross-site page cannot set the
+    ``Authorization`` header, so they are not forgeable. When the request is
+    authenticated via the access cookie instead, an unsafe-method request must
+    echo the readable CSRF cookie back in the ``X-CSRF-Token`` header.
+    """
+
+    if request.method in _SAFE_METHODS or request.url.path in _CSRF_EXEMPT:
+        return
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return
+    if request.cookies.get(ACCESS_COOKIE) is None:
+        # Not cookie-authenticated; current_user will reject it if auth is needed.
+        return
+    header = request.headers.get(CSRF_HEADER)
+    cookie = request.cookies.get(CSRF_COOKIE)
+    if not header or not cookie or not secrets.compare_digest(header, cookie):
+        raise AuthorizationError("CSRF token missing or invalid")
+
+
+CsrfProtect = Depends(csrf_protect)
 
 
 async def current_tenant_id(user: CurrentUser) -> str:
