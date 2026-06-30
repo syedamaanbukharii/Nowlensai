@@ -1,236 +1,62 @@
-"""ServiceNow domain registry.
+"""Platform-neutral domain utilities.
 
-A small, curated knowledge base of the ServiceNow products / capability areas
-the platform reasons about. Agents use this for lightweight domain detection,
-metadata tagging during ingestion, and feature-overlap analysis (the
-``related`` graph encodes commonly-confused or overlapping capabilities).
+The ``Domain`` type and the *generic* operations over a domain catalogue
+(detection, overlap analysis) live here; the actual catalogue is supplied by the
+active :class:`~nowlens.domain_packs.base.DomainPack` (ServiceNow, Salesforce,
+Jira, …), resolved from the registry. The core therefore owns no platform data.
 
-This is intentionally hand-maintained data rather than a stub — extend it as
-coverage grows.
+``Domain`` is re-exported from :mod:`nowlens.domain_packs.base` so existing
+imports (``from nowlens.core.domains import Domain``) keep working.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from nowlens.domain_packs.base import Domain
 
-@dataclass(frozen=True)
-class Domain:
-    key: str
-    name: str
-    category: str
-    description: str
-    aliases: tuple[str, ...] = ()
-    related: tuple[str, ...] = ()
+__all__ = [
+    "Domain",
+    "OverlapResult",
+    "all_domain_keys",
+    "analyze_overlap",
+    "detect_domains",
+    "get_domain",
+]
 
 
-DOMAINS: dict[str, Domain] = {
-    "itsm": Domain(
-        "itsm",
-        "IT Service Management",
-        "product",
-        "Incident, problem, change, request, and service catalog processes.",
-        aliases=("incident management", "change management", "problem management", "service desk"),
-        related=("csm", "itom", "cmdb", "flow_designer"),
-    ),
-    "csm": Domain(
-        "csm",
-        "Customer Service Management",
-        "product",
-        "External customer cases, accounts, contacts, and service operations.",
-        aliases=("customer service", "case management"),
-        related=("itsm", "fsm", "portals"),
-    ),
-    "hrsd": Domain(
-        "hrsd",
-        "HR Service Delivery",
-        "product",
-        "Employee HR cases, lifecycle events, and knowledge.",
-        aliases=("hr service delivery", "employee service center"),
-        related=("itsm", "workspaces", "portals"),
-    ),
-    "spm": Domain(
-        "spm",
-        "Strategic Portfolio Management",
-        "product",
-        "Project, demand, resource, and portfolio planning (formerly ITBM/PPM).",
-        aliases=("itbm", "ppm", "project portfolio management", "demand management"),
-        related=("app_engine", "flow_designer"),
-    ),
-    "cmdb": Domain(
-        "cmdb",
-        "Configuration Management Database",
-        "platform",
-        "Configuration items, relationships, CI classes, and the CSDM model.",
-        aliases=("configuration management", "csdm", "ci"),
-        related=("itom", "itam", "sam", "itsm"),
-    ),
-    "itom": Domain(
-        "itom",
-        "IT Operations Management",
-        "product",
-        "Discovery, service mapping, event management, and health.",
-        aliases=("discovery", "service mapping", "event management"),
-        related=("cmdb", "itsm"),
-    ),
-    "itam": Domain(
-        "itam",
-        "IT Asset Management",
-        "product",
-        "Hardware and software asset lifecycle and financials.",
-        aliases=("asset management", "hardware asset management", "ham"),
-        related=("sam", "cmdb"),
-    ),
-    "sam": Domain(
-        "sam",
-        "Software Asset Management",
-        "product",
-        "Software entitlements, license compliance, and reconciliation.",
-        aliases=("software asset management", "license management"),
-        related=("itam", "cmdb"),
-    ),
-    "grc": Domain(
-        "grc",
-        "Governance, Risk & Compliance",
-        "product",
-        "Policy, risk, audit, and compliance management.",
-        aliases=("irm", "integrated risk management", "risk management", "audit"),
-        related=("secops",),
-    ),
-    "secops": Domain(
-        "secops",
-        "Security Operations",
-        "product",
-        "Security incident response, vulnerability response, and threat intel.",
-        aliases=("security incident response", "vulnerability response", "sir", "vr"),
-        related=("grc", "itsm"),
-    ),
-    "fsm": Domain(
-        "fsm",
-        "Field Service Management",
-        "product",
-        "Field work orders, scheduling, dispatch, and parts.",
-        aliases=("field service", "work order management"),
-        related=("csm", "itsm"),
-    ),
-    "app_engine": Domain(
-        "app_engine",
-        "App Engine",
-        "platform",
-        "Low-code application development on the Now Platform.",
-        aliases=("appengine", "now platform app development", "app engine studio"),
-        related=("flow_designer", "script_includes", "business_rules", "ui_policies"),
-    ),
-    "flow_designer": Domain(
-        "flow_designer",
-        "Flow Designer",
-        "platform",
-        "No-code/low-code process automation: flows, actions, subflows.",
-        aliases=("flow designer", "flows", "subflows"),
-        related=("integrationhub", "business_rules", "app_engine"),
-    ),
-    "integrationhub": Domain(
-        "integrationhub",
-        "IntegrationHub",
-        "platform",
-        "Spokes and actions for integrating external systems within flows.",
-        aliases=("integration hub", "spokes"),
-        related=("flow_designer", "rest_soap"),
-    ),
-    "script_includes": Domain(
-        "script_includes",
-        "Script Includes",
-        "platform",
-        "Reusable server-side script libraries and classes.",
-        aliases=("script include", "server script"),
-        related=("business_rules", "acls", "app_engine"),
-    ),
-    "acls": Domain(
-        "acls",
-        "Access Control Lists",
-        "platform",
-        "Row/field-level security rules controlling CRUD access.",
-        aliases=("acl", "access control", "security rules"),
-        related=("business_rules", "script_includes"),
-    ),
-    "business_rules": Domain(
-        "business_rules",
-        "Business Rules",
-        "platform",
-        "Server-side automation triggered on database operations.",
-        aliases=("business rule", "before/after rule"),
-        related=("script_includes", "client_scripts", "ui_policies", "flow_designer"),
-    ),
-    "ui_policies": Domain(
-        "ui_policies",
-        "UI Policies",
-        "platform",
-        "Declarative form behaviour: mandatory, visible, read-only fields.",
-        aliases=("ui policy",),
-        related=("client_scripts", "business_rules"),
-    ),
-    "client_scripts": Domain(
-        "client_scripts",
-        "Client Scripts",
-        "platform",
-        "Client-side form scripting (onLoad/onChange/onSubmit).",
-        aliases=("client script", "onchange script"),
-        related=("ui_policies", "business_rules"),
-    ),
-    "catalog_items": Domain(
-        "catalog_items",
-        "Catalog Items",
-        "platform",
-        "Service catalog item definitions, variables, and workflows.",
-        aliases=("catalog item", "record producer", "order guide"),
-        related=("flow_designer", "portals", "itsm"),
-    ),
-    "workspaces": Domain(
-        "workspaces",
-        "Workspaces",
-        "ui",
-        "Configurable agent workspaces (UI Builder / Agent Workspace).",
-        aliases=("agent workspace", "configurable workspace", "ui builder"),
-        related=("portals", "csm", "hrsd"),
-    ),
-    "portals": Domain(
-        "portals",
-        "Service Portals",
-        "ui",
-        "Service Portal pages, widgets, and theming.",
-        aliases=("service portal", "portal widget", "employee center"),
-        related=("workspaces", "catalog_items"),
-    ),
-    "rest_soap": Domain(
-        "rest_soap",
-        "REST / SOAP Integrations",
-        "platform",
-        "Inbound/outbound REST and SOAP web services and scripted APIs.",
-        aliases=("rest api", "soap", "scripted rest", "web service", "integration"),
-        related=("integrationhub", "script_includes"),
-    ),
-}
+def _active_domains() -> dict[str, Domain]:
+    """Domains of the configured default pack (empty if none is installed).
+
+    Imports are local to avoid an import-time cycle (the registry imports
+    ``core.config``) and so the catalogue is resolved lazily at call time.
+    """
+
+    from nowlens.core.config import get_settings
+    from nowlens.domain_packs.registry import get_registry
+
+    pack = get_registry().get(get_settings().packs.default)
+    return dict(pack.domains()) if pack is not None else {}
 
 
 def all_domain_keys() -> list[str]:
-    return list(DOMAINS.keys())
+    return list(_active_domains())
 
 
 def get_domain(key: str) -> Domain | None:
-    return DOMAINS.get(key.lower())
+    return _active_domains().get(key.lower())
 
 
 def detect_domains(text: str, *, limit: int = 5) -> list[str]:
     """Heuristically detect the most relevant domains for a piece of text.
 
-    Pure lexical scoring over names + aliases. This is deliberately cheap and
-    deterministic; an LLM-based classifier can refine it (see the business
-    analysis agent), but this gives every component a dependency-free baseline.
+    Pure lexical scoring over names + aliases of the active catalogue. Cheap,
+    deterministic, and dependency-free; an LLM classifier can refine it.
     """
 
     lowered = f" {text.lower()} "
     scores: dict[str, int] = {}
-    for key, domain in DOMAINS.items():
+    for key, domain in _active_domains().items():
         score = 0
         needles = (domain.name.lower(), key.replace("_", " "), *domain.aliases)
         for needle in needles:
@@ -259,8 +85,9 @@ class OverlapResult:
 def analyze_overlap(domain_a: str, domain_b: str) -> OverlapResult:
     """Structural overlap between two domains via the ``related`` graph."""
 
-    a = get_domain(domain_a)
-    b = get_domain(domain_b)
+    domains = _active_domains()
+    a = domains.get(domain_a.lower())
+    b = domains.get(domain_b.lower())
     if a is None or b is None:
         raise KeyError("unknown domain in overlap analysis")
     shared = sorted(set(a.related) & set(b.related))

@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 
 from nowlens.api.deps import CurrentUser
 from nowlens.core.domains import (
-    DOMAINS,
     Domain,
     all_domain_keys,
     analyze_overlap,
@@ -59,7 +58,7 @@ def _domain_out(domain: Domain) -> DomainOut:
 
 @router.get("", response_model=list[DomainOut])
 async def list_domains(_: CurrentUser) -> list[DomainOut]:
-    return [_domain_out(DOMAINS[key]) for key in all_domain_keys()]
+    return [_domain_out(d) for key in all_domain_keys() if (d := get_domain(key)) is not None]
 
 
 @router.get("/{key}", response_model=DomainOut)

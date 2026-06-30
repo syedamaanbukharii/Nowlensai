@@ -6,7 +6,6 @@ import pytest
 
 from nowlens.core.config import Settings, get_settings
 from nowlens.core.domains import (
-    DOMAINS,
     all_domain_keys,
     analyze_overlap,
     detect_domains,
@@ -20,7 +19,7 @@ from nowlens.core.domains import (
 
 def test_registry_non_trivial() -> None:
     assert len(all_domain_keys()) >= 20
-    assert "itsm" in DOMAINS
+    assert "itsm" in all_domain_keys()
 
 
 def test_get_domain_case_insensitive() -> None:

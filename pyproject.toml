@@ -75,6 +75,11 @@ dev = [
 [project.scripts]
 nowlens = "nowlens.cli:main"
 
+# First-party Domain Pack, discovered via the same entry-point mechanism as any
+# third-party pack — the core never imports it by name.
+[project.entry-points."nowlens.domain_packs"]
+servicenow = "nowlens.domain_packs.servicenow.pack:ServiceNowPack"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
