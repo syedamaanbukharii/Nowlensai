@@ -16,7 +16,7 @@ from typing import Protocol
 
 from nowlens.core.logging import get_logger
 from nowlens.ingestion.models import EmbeddedChunk
-from nowlens.rag.vector_store import QdrantVectorStore
+from nowlens.rag.base import VectorStore
 
 log = get_logger(__name__)
 
@@ -51,7 +51,7 @@ def _to_point(embedded: EmbeddedChunk, tenant_id: str) -> dict:
 
 async def index_chunks(
     embedded: list[EmbeddedChunk],
-    vector_store: QdrantVectorStore,
+    vector_store: VectorStore,
     *,
     tenant_id: str,
     sink: ChunkSink | None = None,

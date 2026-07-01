@@ -1,5 +1,6 @@
 """Hybrid RAG: vector + lexical retrieval, fusion, reranking, compression."""
 
+from nowlens.rag.base import VectorStore
 from nowlens.rag.citations import build_citations, format_context
 from nowlens.rag.compression import compress_chunks
 from nowlens.rag.fusion import reciprocal_rank_fusion
@@ -17,6 +18,7 @@ __all__ = [
     "QdrantVectorStore",
     "RetrievalResult",
     "RetrievedChunk",
+    "VectorStore",
     "adaptive_top_k",
     "build_citations",
     "build_reranker",

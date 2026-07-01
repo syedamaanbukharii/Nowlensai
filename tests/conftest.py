@@ -235,7 +235,7 @@ class InMemoryVectorStore:
     async def count(self) -> int:
         return len(self._points)
 
-    async def delete_document(self, document_id: str) -> int:
+    async def delete_document(self, document_id: str, *, tenant_id: str | None = None) -> None:
         to_remove = [
             cid
             for cid, (_, payload) in self._points.items()
@@ -243,7 +243,6 @@ class InMemoryVectorStore:
         ]
         for cid in to_remove:
             del self._points[cid]
-        return len(to_remove)
 
     async def aclose(self) -> None:
         return None
@@ -338,7 +337,7 @@ async def seeded_retriever(
     lexical = BM25Retriever(SAMPLE_CHUNKS)
     return HybridRetriever(
         embedder=embedder,
-        vector_store=vector_store,  # type: ignore[arg-type]
+        vector_store=vector_store,
         lexical=lexical,
         reranker=LexicalOverlapReranker(),
         settings=rag_settings,

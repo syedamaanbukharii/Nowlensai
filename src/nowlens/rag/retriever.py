@@ -20,13 +20,13 @@ from collections.abc import Sequence
 from nowlens.core.config import RAGSettings
 from nowlens.core.logging import get_logger
 from nowlens.llm.base import EmbeddingProvider
+from nowlens.rag.base import VectorStore
 from nowlens.rag.citations import build_citations, format_context
 from nowlens.rag.compression import compress_chunks
 from nowlens.rag.fusion import reciprocal_rank_fusion
 from nowlens.rag.lexical import LexicalRetriever
 from nowlens.rag.reranker import Reranker
 from nowlens.rag.types import RetrievalResult
-from nowlens.rag.vector_store import QdrantVectorStore
 
 log = get_logger(__name__)
 
@@ -36,7 +36,7 @@ class HybridRetriever:
         self,
         *,
         embedder: EmbeddingProvider,
-        vector_store: QdrantVectorStore,
+        vector_store: VectorStore,
         lexical: LexicalRetriever,
         reranker: Reranker,
         settings: RAGSettings,
