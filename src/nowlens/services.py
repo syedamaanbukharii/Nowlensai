@@ -19,6 +19,7 @@ from nowlens.db.repositories import ChunkRepository, DocumentRepository
 from nowlens.ingestion.pipeline import IngestionPipeline
 from nowlens.ingestion.stages.clean import AICleaner
 from nowlens.llm.factory import get_chat_provider, get_embedding_provider
+from nowlens.rag.base import VectorStore
 from nowlens.rag.lexical import PostgresFTSRetriever
 from nowlens.rag.reranker import Reranker, build_reranker
 from nowlens.rag.retriever import HybridRetriever
@@ -26,7 +27,13 @@ from nowlens.rag.vector_store import QdrantVectorStore
 
 
 @lru_cache
-def get_vector_store() -> QdrantVectorStore:
+def get_vector_store() -> VectorStore:
+    """Construct the configured vector store (Qdrant today) as a ``VectorStore``.
+
+    Callers depend on the protocol, not the concrete backend, so swapping the
+    vector database is a change here only.
+    """
+
     settings = get_settings()
     return QdrantVectorStore(
         url=settings.qdrant_url,

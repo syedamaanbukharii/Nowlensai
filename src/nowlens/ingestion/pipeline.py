@@ -45,7 +45,7 @@ from nowlens.ingestion.stages.normalize import normalize
 from nowlens.ingestion.stages.render import Renderer
 from nowlens.ingestion.stages.validate import validate_embedded
 from nowlens.llm.base import EmbeddingProvider
-from nowlens.rag.vector_store import QdrantVectorStore
+from nowlens.rag.base import VectorStore
 
 log = get_logger(__name__)
 
@@ -58,7 +58,7 @@ class IngestionPipeline:
         *,
         settings: IngestionSettings,
         embedder: EmbeddingProvider,
-        vector_store: QdrantVectorStore,
+        vector_store: VectorStore,
         expected_dim: int,
         tenant_id: str,
         crawler: Crawler | None = None,

@@ -111,6 +111,7 @@ PostgreSQL is the system of record for **metadata**: users, chat sessions and me
 
 - **New LLM/embedding backend** — implement the `llm.base` interfaces and register in `llm.factory`.
 - **New retriever** — implement the `LexicalRetriever` / `Reranker` protocols and wire via `services`.
+- **New vector store** — implement the `rag.base.VectorStore` protocol and return it from `services.get_vector_store`; retrieval/ingestion/API depend on the protocol, not on Qdrant.
 - **New specialist agent** — add a node function and register it in `agents.graph._SPECIALISTS` plus the router vocabulary.
 - **New platform** — ship a Domain Pack that advertises the `nowlens.domain_packs` entry-point; no core change. See [DOMAIN_PACKS.md](DOMAIN_PACKS.md).
 - **New module** — add a `Domain` to the relevant pack's catalogue.

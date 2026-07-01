@@ -62,7 +62,7 @@ def _pipeline(
     return IngestionPipeline(
         settings=IngestionSettings(),
         embedder=FakeEmbeddingProvider(),
-        vector_store=InMemoryVectorStore(),  # type: ignore[arg-type]
+        vector_store=InMemoryVectorStore(),
         expected_dim=EMBED_DIM,
         tenant_id="tenant-test",
         crawler=crawler,  # type: ignore[arg-type]
@@ -77,7 +77,7 @@ async def test_pipeline_happy_path() -> None:
     pipeline = IngestionPipeline(
         settings=IngestionSettings(),
         embedder=FakeEmbeddingProvider(),
-        vector_store=store,  # type: ignore[arg-type]
+        vector_store=store,
         expected_dim=EMBED_DIM,
         tenant_id="tenant-test",
         crawler=crawler,  # type: ignore[arg-type]
