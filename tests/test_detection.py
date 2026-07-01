@@ -38,8 +38,8 @@ def test_detect_module_scoped_to_platform() -> None:
 
 
 def test_detect_module_unknown_platform_is_empty() -> None:
-    # No Salesforce pack is installed yet, so its modules can't be detected.
-    assert detect_module("write an apex class", "salesforce") == []
+    # An uninstalled platform has no catalogue, so nothing can be detected.
+    assert detect_module("write an apex class", "no_such_platform") == []
 
 
 # --------------------------------------------------------------------------- #

@@ -75,10 +75,11 @@ dev = [
 [project.scripts]
 nowlens = "nowlens.cli:main"
 
-# First-party Domain Pack, discovered via the same entry-point mechanism as any
-# third-party pack — the core never imports it by name.
+# First-party Domain Packs, discovered via the same entry-point mechanism as any
+# third-party pack — the core never imports them by name.
 [project.entry-points."nowlens.domain_packs"]
 servicenow = "nowlens.domain_packs.servicenow.pack:ServiceNowPack"
+salesforce = "nowlens.domain_packs.salesforce.pack:SalesforcePack"
 
 [tool.setuptools.packages.find]
 where = ["src"]
