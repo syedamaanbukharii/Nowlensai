@@ -80,6 +80,7 @@ nowlens = "nowlens.cli:main"
 [project.entry-points."nowlens.domain_packs"]
 servicenow = "nowlens.domain_packs.servicenow.pack:ServiceNowPack"
 salesforce = "nowlens.domain_packs.salesforce.pack:SalesforcePack"
+jira = "nowlens.domain_packs.jira.pack:JiraPack"
 
 [tool.setuptools.packages.find]
 where = ["src"]

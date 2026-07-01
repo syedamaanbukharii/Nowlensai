@@ -108,16 +108,23 @@ _ROLE_HINTS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Minimum confidence required to switch *away* from the default platform. A
+# strong platform-specific signal (e.g. "salesforce", "jql", "glide") scores
+# >= 0.5, whereas a single shared domain alias (e.g. "service desk", which many
+# platforms use) scores lower. Requiring a strong signal prevents ambiguous
+# vocabulary from mis-routing to the wrong platform as more packs are installed.
+MIN_PLATFORM_CONFIDENCE = 0.5
+
+
 def detect_platform(query: str, history: History = ()) -> PlatformSignal:
     """Resolve the platform via the pack registry; fall back to the default.
 
-    Returns the highest-confidence pack signal, or the configured default
-    platform with zero confidence when nothing matches (keeps behaviour stable
-    on a single-pack install).
+    Only a sufficiently strong signal switches platform; weak/ambiguous evidence
+    falls back to the configured default so shared vocabulary can't mis-route.
     """
 
     signal = get_registry().detect(query, [dict(turn) for turn in history])
-    if signal.detected:
+    if signal.confidence >= MIN_PLATFORM_CONFIDENCE:
         return signal
     return PlatformSignal(get_settings().packs.default, 0.0, [])
 
