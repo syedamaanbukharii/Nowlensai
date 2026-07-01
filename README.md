@@ -1,8 +1,8 @@
 # NowLens AI
 
-**A multi-agent ServiceNow expert: hybrid RAG retrieval, a LangGraph agent graph, and an automated documentation ingestion pipeline — behind a typed, observable FastAPI.**
+**A multi-agent, multi-platform enterprise intelligence platform: pluggable Domain Packs, automatic platform detection, hybrid RAG retrieval, a LangGraph agent graph, and an automated ingestion pipeline — behind a typed, observable FastAPI.**
 
-NowLens answers ServiceNow questions (best practices, business analysis, feature overlap, marketplace readiness, research) by retrieving from a curated corpus of ingested documentation and reasoning over it with a graph of specialist agents. It is provider-agnostic (chat via Ollama or Groq; embeddings via Ollama or any OpenAI-compatible service), stores vectors in Qdrant and metadata in PostgreSQL, and ships as a **multi-tenant**, cloud-agnostic SaaS platform: HttpOnly-cookie auth with CSRF, RBAC, tenant data isolation, rate limiting, prompt-injection defences, security headers, Prometheus metrics, a Next.js frontend, and Kubernetes manifests.
+NowLens answers deep questions about enterprise platforms — **ServiceNow, Salesforce, and Jira today, more via plugins** — by retrieving from a curated corpus and reasoning over it with a graph of specialist agents. The platform core is platform-agnostic: each ecosystem is a **Domain Pack** discovered at runtime, and the system **automatically detects the platform, module, and user role** from the question — the user never selects one. It is provider-agnostic (chat via Ollama or Groq; embeddings via Ollama or any OpenAI-compatible service), stores vectors in Qdrant and metadata in PostgreSQL, and ships as a **multi-tenant**, cloud-agnostic SaaS platform: HttpOnly-cookie auth with CSRF, RBAC, tenant data isolation, rate limiting, prompt-injection defences, security headers, Prometheus metrics, a Next.js frontend, and Kubernetes manifests.
 
 ---
 
@@ -25,16 +25,19 @@ NowLens answers ServiceNow questions (best practices, business analysis, feature
 
 ## Why NowLens
 
-ServiceNow is broad: a single question ("should we use CSM or ITSM for this?", "how do I publish a scoped app to the Store?", "what changed in the last release?") can span many products and platform constructs. NowLens treats this as a retrieval-plus-reasoning problem:
+Enterprise platforms are broad and numerous: a single question ("should we use CSM or ITSM?", "how do I write an Apex trigger?", "build a JQL filter for my board") spans many products, constructs, and *platforms*. NowLens treats this as a plugin-plus-retrieval-plus-reasoning problem:
 
+- **Domain Packs** — each platform (ServiceNow, Salesforce, Jira, …) is a self-contained pack the core discovers via Python entry-points. **Adding a platform requires only installing a pack — no change to the core.** See [docs/DOMAIN_PACKS.md](docs/DOMAIN_PACKS.md).
+- **Automatic detection** — the agent graph resolves the **platform** (via the pack registry), the **module** within it, and the user's **role** from the question, then routes accordingly. No manual platform selection.
 - **Hybrid retrieval** — dense vector search (Qdrant) fused with lexical search (BM25 / PostgreSQL full-text) via Reciprocal Rank Fusion, then reranked and compressed, so answers are grounded in real documentation with citations.
 - **Specialist agents** — a deterministic router dispatches each question to the right specialist (best practices, business analysis, feature overlap, marketplace assessment, research), and a quality-assurance node checks grounding and citation validity before the answer is returned.
 - **Automated ingestion** — a documented crawl → extract → clean → normalize → chunk → enrich → dedup → embed → validate → index pipeline keeps the corpus fresh, with incremental re-crawls and per-stage reporting.
 
-Everything depends only on provider-agnostic interfaces, so swapping Ollama for Groq, pointing embeddings at a hosted OpenAI-compatible service, or adding a backend is a configuration change.
+Everything depends only on provider-agnostic interfaces, so swapping Ollama for Groq, pointing embeddings at a hosted OpenAI-compatible service, adding a platform pack, or adding a backend is a configuration/plugin change — never a core rewrite.
 
 ### Enterprise / production readiness
 
+- **Pluggable platforms (Domain Packs)** — the core owns no platform data. Packs (ServiceNow, Salesforce, Jira) are discovered via the `nowlens.domain_packs` entry-point group; a new platform ships as a distribution, and detection distinguishes them automatically. See [docs/DOMAIN_PACKS.md](docs/DOMAIN_PACKS.md).
 - **Multi-tenant isolation** — every tenant-scoped table carries a `tenant_id`; repositories and hybrid retrieval (Qdrant payload filter + Postgres FTS predicate) scope all reads and writes to the caller's tenant. Platform admins provision tenants and users via `/api/v1/tenants`. The tenant is resolved from the authenticated user, so the token format is unchanged.
 - **Browser-safe auth** — access/refresh JWTs are issued as **HttpOnly cookies** (XSS-resistant) with double-submit **CSRF** protection, while the bearer-token flow stays fully supported for API clients.
 - **Security by default** — production refuses to boot with a weak JWT secret; responses carry hardening headers; CORS is locked to explicit methods/headers; rate limiting keys on the user; crawled responses are size-capped.
@@ -63,7 +66,7 @@ Everything depends only on provider-agnostic interfaces, so swapping Ollama for 
                                           └──────────────┘
 ```
 
-The agent graph is a single forward pass: `route → knowledge_retrieval → <specialist> → quality_assurance`. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
+The agent graph is a single forward pass: `detect → route → knowledge_retrieval → <specialist> → quality_assurance`, where `detect` resolves platform/module/role. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
 ## Quickstart (Docker)
 
@@ -138,6 +141,8 @@ All configuration is environment-driven through a single typed `Settings` object
 |----------|---------|---------|
 | `NOWLENS_LLM__PROVIDER` | `ollama` | Chat backend: `ollama` or `groq` |
 | `NOWLENS_LLM__EMBEDDING_PROVIDER` | `ollama` | Embedding backend: `ollama` or `openai` (OpenAI-compatible) |
+| `NOWLENS_PACKS__ENABLED` | _(all)_ | Comma-separated allow-list of Domain Packs to load; empty loads all discovered |
+| `NOWLENS_PACKS__DEFAULT` | `servicenow` | Platform assumed when detection is inconclusive |
 | `NOWLENS_LLM__OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint |
 | `NOWLENS_DATABASE_URL` | `postgresql+asyncpg://nowlens:nowlens@localhost:5432/nowlens` | Postgres DSN |
 | `NOWLENS_QDRANT_URL` | `http://localhost:6333` | Qdrant endpoint |
@@ -204,17 +209,18 @@ make test-cov      # with coverage
 make check         # lint + typecheck + test (the CI gate)
 ```
 
-The suite (157 tests) covers pure logic (fusion, compression, citations, chunking, SimHash dedup, normalization, enrichment, validation, BM25, domains), security (passwords, JWT, sanitisation, RBAC, rate limiting, prompt injection, the production-secret guard, security headers, cookie auth + CSRF), multi-tenant isolation, the OpenAI-compatible embedding provider (via mock transport), configuration parsing, the hybrid retriever, the ingestion pipeline end-to-end, the agent graph (including concurrency isolation), and the API via `TestClient`. External systems are replaced with in-memory fakes: a deterministic chat/embedding provider, an in-memory vector store, and an in-memory SQLite database for the persistence-backed endpoints. No network, Qdrant, Postgres, Ollama, or Groq is required to run the tests.
+The suite (187 tests) covers pure logic (fusion, compression, citations, chunking, SimHash dedup, normalization, enrichment, validation, BM25, domains), the Domain Pack framework (registry, entry-point discovery, the ServiceNow/Salesforce/Jira packs, and automatic platform/module/role detection across all three), security (passwords, JWT, sanitisation, RBAC, rate limiting, prompt injection, the production-secret guard, security headers, cookie auth + CSRF), multi-tenant isolation, the OpenAI-compatible embedding provider (via mock transport), configuration parsing, the hybrid retriever, the ingestion pipeline end-to-end, the agent graph (including concurrency isolation), and the API via `TestClient`. External systems are replaced with in-memory fakes: a deterministic chat/embedding provider, an in-memory vector store, and an in-memory SQLite database for the persistence-backed endpoints. No network, Qdrant, Postgres, Ollama, or Groq is required to run the tests.
 
 ## Project layout
 
 ```
 src/nowlens/
-  core/          config, exceptions, logging, tracing, domain registry
-  llm/           provider-agnostic chat/embedding interfaces (Ollama, Groq)
+  core/          config, exceptions, logging, tracing, platform-neutral domain utils
+  domain_packs/  Domain Pack framework + registry; servicenow / salesforce / jira packs
+  llm/           provider-agnostic chat/embedding interfaces (Ollama, Groq, OpenAI)
   rag/           vector store, lexical, fusion, rerank, compression, retriever
   ingestion/     pipeline + stages (crawl…index)
-  agents/        LangGraph nodes, prompts, graph wiring
+  agents/        LangGraph nodes, detection (platform/module/role), prompts, graph wiring
   db/            SQLAlchemy models (multi-tenant), repositories, session, Alembic migrations
   security/      JWT, passwords, RBAC, rate limiting, sanitisation, injection
   observability/ Prometheus metrics, optional Langfuse tracing
@@ -236,6 +242,7 @@ k8s/             cloud-agnostic Kubernetes manifests (kubectl apply -k k8s/)
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — components, data flow, design decisions
+- [docs/DOMAIN_PACKS.md](docs/DOMAIN_PACKS.md) — the Domain Pack framework + authoring a pack
 - [docs/API.md](docs/API.md) — endpoint reference
 - [docs/INGESTION.md](docs/INGESTION.md) — the ingestion pipeline
 - [docs/SECURITY.md](docs/SECURITY.md) — auth, RBAC, hardening

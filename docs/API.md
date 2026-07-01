@@ -88,7 +88,7 @@ Request:
 }
 ```
 
-`session_id` is optional — omit it to create a new session (its id is returned). `domains` optionally constrains retrieval; otherwise domains are detected. `final_top_k` (1–20) overrides the chunk budget.
+`session_id` is optional — omit it to create a new session (its id is returned). `domains` optionally constrains retrieval; otherwise the **platform, module(s), and role are auto-detected** from the message (returned as `platform` / `role` / `domains`). `final_top_k` (1–20) overrides the chunk budget.
 
 Response:
 
@@ -96,6 +96,8 @@ Response:
 {
   "session_id": "…",
   "answer": "…",
+  "platform": "servicenow",
+  "role": "administrator",
   "intent": "best_practice",
   "domains": ["itsm"],
   "citations": [

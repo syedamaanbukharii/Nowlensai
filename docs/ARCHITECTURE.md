@@ -4,6 +4,7 @@ NowLens is a retrieval-augmented, multi-agent system behind a typed FastAPI. Thi
 
 ## Goals and principles
 
+- **Platform-agnostic core.** The core owns no platform data. Each enterprise ecosystem (ServiceNow, Salesforce, Jira, …) is a **Domain Pack** discovered via the `nowlens.domain_packs` entry-point group; the core never imports a pack by name. Adding a platform is a plugin, not a rewrite. See [DOMAIN_PACKS.md](DOMAIN_PACKS.md).
 - **Provider-agnostic.** Business logic depends only on the `LLMProvider` / `EmbeddingProvider` interfaces (`nowlens.llm.base`). Chat (Ollama, Groq) and embeddings (Ollama, OpenAI-compatible) are selected independently by configuration — so a hosted chat model can pair with local or hosted embeddings; adding a backend is a factory change, never an application change.
 - **Grounded answers.** Generation is always paired with retrieval and citations, and a quality-assurance step checks grounding before an answer is returned. A degraded "no knowledge base" mode is explicit rather than silently hallucinated.
 - **Each stage independently testable.** Retrieval, ingestion, and the agent graph are wired from small, pure-where-possible units. The whole system runs offline against in-memory fakes (see the test suite).
@@ -13,16 +14,19 @@ NowLens is a retrieval-augmented, multi-agent system behind a typed FastAPI. Thi
 
 ```
 core/          Settings, typed exceptions, structured logging, trace ids,
-               and the ServiceNow domain registry (≈two dozen capability areas).
-llm/           Provider-agnostic chat + embedding ABCs; Ollama and Groq clients;
-               an lru-cached factory.
+               and platform-neutral domain utilities (detection / overlap).
+domain_packs/  The DomainPack contract + registry (entry-point discovery), and
+               the first-party servicenow / salesforce / jira packs.
+llm/           Provider-agnostic chat + embedding ABCs; Ollama, Groq, and an
+               OpenAI-compatible embedding client; an lru-cached factory.
 rag/           QdrantVectorStore, lexical retrievers (BM25 / Postgres FTS),
                Reciprocal Rank Fusion, rerankers, context compression,
                citations, and the HybridRetriever that wires them.
 ingestion/     The pipeline orchestrator and its stages (crawl, render, extract,
                clean, normalize, chunk, enrich, dedup, embed, validate, index).
-agents/        LangGraph nodes (router, knowledge retrieval, five specialists,
-               quality assurance), prompts, shared state, and graph wiring.
+agents/        LangGraph nodes (detection, router, knowledge retrieval, five
+               specialists, quality assurance), platform/module/role detection,
+               prompts, shared state, and graph wiring.
 db/            SQLAlchemy 2.0 async models, repositories (the only SQL),
                session management, and Alembic migrations.
 security/      JWT issuance/verification, bcrypt passwords, RBAC, a sliding-window
@@ -46,14 +50,15 @@ POST /api/v1/chat
   → resolve/create ChatSession, persist user msg [db.repositories]
   → run_answer(ctx, message, …)                 [agents.graph]
         START
-          → route                 classify intent + resolve domains (deterministic)
+          → detect                platform (pack registry) + module + role
+          → route                 classify intent from detected modules
           → knowledge_retrieval   HybridRetriever → context + citations
           → <specialist>          best_practices | business_analysis |
                                   feature_overlap | marketplace | research
           → quality_assurance     grounding + citation validity check
         END
   → persist assistant msg (+ intent/citations/qa), audit event
-  → ChatResponse {answer, intent, domains, citations, qa, grounded, metrics}
+  → ChatResponse {answer, platform, role, intent, domains, citations, qa, grounded, metrics}
 ```
 
 `POST /chat/stream` runs a lower-latency single pass (retrieve → best-practice generation) and emits Server-Sent Events: `session` → `citations` → many `token` → `done` (or a terminal `error`). Validation, injection guarding, and session resolution all happen *before* streaming begins, so failures are ordinary HTTP errors rather than mid-stream surprises.
@@ -83,7 +88,8 @@ query
 
 LangGraph's `StateGraph` is the orchestration core. The graph is a single forward pass (no loops), which keeps execution bounded and deterministic:
 
-- **route** (pure) resolves the working domain set and classifies intent with a deterministic, unit-testable heuristic. Specialist agents still do the heavy lifting with the LLM; routing only decides *which* specialist runs.
+- **detect** (pure) resolves the **platform** (via the Domain Pack registry — the highest-confidence pack, or the default when evidence is weak), the **module** within that platform, and the user's **role**, all with deterministic offline heuristics (`agents.detect`). The user never selects a platform; it is inferred and surfaced on the response.
+- **route** (pure) classifies intent from the detected modules with a deterministic, unit-testable heuristic. Specialist agents still do the heavy lifting with the LLM; routing only decides *which* specialist runs.
 - **knowledge_retrieval** runs the hybrid retriever and writes context + citations into the state. With no retriever wired in, it returns a `grounded: false` state so downstream nodes flag the lack of grounding rather than pretending.
 - **specialists** each assemble a prompt and call the provider-agnostic LLM. Structured specialists (business analysis, feature overlap, marketplace) return JSON that is parsed defensively and also rendered to prose, so the chat surface always has readable text.
 - **quality_assurance** runs a deterministic citation check (do cited `[n]` markers exist?) and an LLM qualitative review, reconciling the two (a concrete out-of-range citation overrides any model claim of validity). QA degrades to the deterministic result if the LLM review fails.
@@ -106,6 +112,7 @@ PostgreSQL is the system of record for **metadata**: users, chat sessions and me
 - **New LLM/embedding backend** — implement the `llm.base` interfaces and register in `llm.factory`.
 - **New retriever** — implement the `LexicalRetriever` / `Reranker` protocols and wire via `services`.
 - **New specialist agent** — add a node function and register it in `agents.graph._SPECIALISTS` plus the router vocabulary.
-- **New domain** — extend the hand-maintained registry in `core.domains`.
+- **New platform** — ship a Domain Pack that advertises the `nowlens.domain_packs` entry-point; no core change. See [DOMAIN_PACKS.md](DOMAIN_PACKS.md).
+- **New module** — add a `Domain` to the relevant pack's catalogue.
 
 See [INGESTION.md](INGESTION.md), [SECURITY.md](SECURITY.md), [CONFIGURATION.md](CONFIGURATION.md), and [DEPLOYMENT.md](DEPLOYMENT.md) for deeper dives.

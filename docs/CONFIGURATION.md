@@ -36,6 +36,15 @@ Connection-pool tuning for the async SQLAlchemy engine. The DSN itself stays at
 | `POOL_TIMEOUT_S` | float | `30.0` | Wait for a free connection before erroring |
 | `POOL_RECYCLE_S` | int | `1800` | Recycle connections older than this (avoids stale server-side closes) |
 
+## Domain Packs (`NOWLENS_PACKS__…`)
+
+Platform plugins are discovered via the `nowlens.domain_packs` entry-point group; these settings control which load and the fallback platform. See [DOMAIN_PACKS.md](DOMAIN_PACKS.md).
+
+| Variable | Type | Default | Notes |
+|---|---|---|---|
+| `ENABLED` | csv | _(empty = all)_ | Allow-list of pack entry-point names to load (e.g. `servicenow,jira`) |
+| `DEFAULT` | str | `servicenow` | Platform assumed when detection is inconclusive |
+
 ## LLM (`NOWLENS_LLM__…`)
 
 | Variable | Type | Default | Notes |
